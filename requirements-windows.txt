@@ -1,0 +1,2 @@
+# Compatibility entry for the Windows build script.
+-r requirements-release.txt

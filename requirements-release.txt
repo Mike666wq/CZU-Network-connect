@@ -1,0 +1,7 @@
+# Shared release environment, Python 3.12 (Mac M-series and Windows x64).
+PySide6==6.11.2
+psutil==7.2.2
+tzdata==2026.5
+pytest==9.1.1
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.8

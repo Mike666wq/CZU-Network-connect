@@ -1,0 +1,167 @@
+name: Desktop build and Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - name: Read version and verify tag
+        id: version
+        shell: pwsh
+        run: |
+          $Version = python -c "from campus_assistant import __version__; print(__version__)"
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot read version' }
+          "version=$Version" >> $env:GITHUB_OUTPUT
+          if ($env:GITHUB_REF -like 'refs/tags/*') {
+            python tools/package_release.py verify-tag $env:GITHUB_REF_NAME
+            if ($LASTEXITCODE -ne 0) { throw 'Tag must match version' }
+          }
+      - name: Test, build and smoke-test Windows portable application
+        shell: pwsh
+        run: .\build.ps1
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: windows-release
+          path: dist/release-v${{ steps.version.outputs.version }}/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload Windows validation
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: windows-validation
+          path: |
+            .cache/windows-tests.xml
+            .cache/windows-smoke.json
+            .cache/windows-smoke.png
+            .cache/windows-build-info.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 35
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          architecture: arm64
+      - name: Verify M-series runner and tag
+        run: |
+          python -c 'import platform; assert platform.machine() == "arm64", "Mac release requires M-series runner"'
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            python tools/package_release.py verify-tag "$GITHUB_REF_NAME"
+          fi
+      - name: Install fixed dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip --isolated install --index-url https://pypi.org/simple -r requirements-release.txt
+      - name: Run offline regression suite
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: .venv/bin/python -m pytest -q --junitxml=.cache/macos-tests.xml
+      - name: Build Mac M-series application on GitHub
+        run: ./build.sh
+      - name: Packaged loopback smoke test
+        run: |
+          "dist/校园网助手.app/Contents/MacOS/校园网助手" --smoke-test .cache/macos-smoke.json
+          .venv/bin/python -c 'import json; assert json.load(open(".cache/macos-smoke.json"))["ok"] is True'
+      - name: Archive verified Mac M-series app
+        run: |
+          .venv/bin/python tools/windows_build_info.py .cache/macos-build-info.json tests-passed
+          version=$(.venv/bin/python -c 'from campus_assistant import __version__;print(__version__)')
+          .venv/bin/python tools/package_release.py macos --app 'dist/校园网助手.app' \
+            --output "dist/release-v${version}-macos" --smoke-report .cache/macos-smoke.json \
+            --build-metadata .cache/macos-build-info.json
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: macos-release
+          path: dist/release-v*-macos/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload Mac validation
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: macos-validation
+          path: |
+            .cache/macos-tests.xml
+            .cache/macos-smoke.json
+            .cache/macos-smoke.png
+            .cache/macos-build-info.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/') && github.event_name == 'push'
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          pattern: '*-release'
+          path: release
+          merge-multiple: true
+      - name: Verify both platforms and create Release draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.windows.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum --check SHA256SUMS.txt
+          sha256sum --check SHA256SUMS-macos.txt
+          test "$TAG" = "v$VERSION"
+          cat SHA256SUMS.txt SHA256SUMS-macos.txt > SHA256SUMS-all.txt
+          assets=("campus-network-assistant-v${VERSION}-windows-x64.zip"
+                  "campus-network-assistant-v${VERSION}-macos-arm64.zip"
+                  "campus-network-assistant-v${VERSION}-source.zip"
+                  "SHA256SUMS-all.txt" "build-info.json" "macos-build-info.json")
+          if draft=$(gh release view "$TAG" --json isDraft --jq '.isDraft' 2>/dev/null); then
+            if [ "$draft" != "true" ]; then
+              echo 'Refusing to overwrite a published Release. Create a new version tag.' >&2
+              exit 1
+            fi
+            gh release upload "$TAG" "${assets[@]}" --clobber
+            gh release edit "$TAG" --title "校园网助手 $TAG · Mac M系列 / Windows" --notes-file release-notes.md --draft
+          else
+            gh release create "$TAG" "${assets[@]}" --verify-tag --draft \
+              --title "校园网助手 $TAG · Mac M系列 / Windows" --notes-file release-notes.md
+          fi

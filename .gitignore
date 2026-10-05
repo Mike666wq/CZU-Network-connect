@@ -27,3 +27,18 @@ logs/
 .DS_Store
 .idea/
 .vscode/
+
+# Local release exports, signing credentials and downloaded artifacts
+/release/
+/release-assets/
+*.dmg
+*.pkg
+*.exe
+*.msi
+*.p12
+*.pfx
+*.key
+*.pem
+*.mobileprovision
+*.cer
+*.crt

@@ -8,6 +8,10 @@ def main() -> int:
     if "--http-worker" in sys.argv:
         from campus_assistant.protocol import http_worker_entry
         return http_worker_entry()
+    if "--smoke-test" in sys.argv:
+        from pathlib import Path
+        from campus_assistant.packaged_smoke import run_smoke
+        return run_smoke(Path(sys.argv[sys.argv.index("--smoke-test") + 1]))
     if "--diagnose-network" in sys.argv:
         from campus_assistant.diagnostics import diagnose_network
         return diagnose_network()

@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (QWidget, QFrame, QLabel, QHBoxLayout, QVBoxLayout
 from .engine import State
 from .config import DORM_PROVIDERS
 from . import __version__
+from .platform_ui import platform_name, ui_font, startup_text, background_text
 
 STYLE = """
 QMainWindow, QWidget#workspace { background: #141a1d; color: #edf2f0; }
@@ -229,12 +230,12 @@ class ProcessTrack(QWidget):
             if state == "done":
                 p.setPen(QPen(color, 1.8)); p.drawLine(QPointF(x-5, y), QPointF(x-1, y+4)); p.drawLine(QPointF(x-1, y+4), QPointF(x+6, y-4))
             else:
-                p.setFont(QFont(".AppleSystemUIFont", 11))
+                p.setFont(QFont(ui_font(), 11))
                 p.drawText(QRectF(x-12, y-12, 24, 24), Qt.AlignmentFlag.AlignCenter, "—" if state == "skipped" else str(i+1))
             p.setPen(QColor("#e1eaeb" if state in {"done", "active"} else "#9babb2"))
-            p.setFont(QFont(".AppleSystemUIFont", 12))
+            p.setFont(QFont(ui_font(), 12))
             p.drawText(QRectF(step*i, 45, step, 20), Qt.AlignmentFlag.AlignCenter, self.titles[i])
-            p.setPen(color); p.setFont(QFont(".AppleSystemUIFont", 10))
+            p.setPen(color); p.setFont(QFont(ui_font(), 10))
             p.drawText(QRectF(step*i, 69, step, 18), Qt.AlignmentFlag.AlignCenter, captions[state])
         p.end()
 
@@ -362,14 +363,14 @@ class Dashboard(QWidget):
 
 
 def build_workspace(window):
-    window.setStyleSheet(STYLE)
+    window.setStyleSheet(STYLE.replace("'.AppleSystemUIFont', 'PingFang SC', sans-serif", "'" + ui_font() + "', sans-serif"))
     window.resize(1160, 850)
     window.setMinimumSize(1020, 810)
     root = QWidget(); root.setObjectName("workspace")
     layout = QVBoxLayout(root); layout.setContentsMargins(26, 19, 26, 16); layout.setSpacing(17)
     header = QHBoxLayout(); brand = QVBoxLayout(); brand.setSpacing(3)
     brand.addWidget(label("校园网助手", "brand")); brand.addWidget(label("让连接自动发生，让过程清晰可见。", "muted"))
-    header.addLayout(brand); header.addStretch(); window.ui_badge = label("macOS · 界面预览", "badge"); header.addWidget(window.ui_badge)
+    header.addLayout(brand); header.addStretch(); window.ui_badge = label(platform_name() + " · 后台连接助手", "badge"); header.addWidget(window.ui_badge)
     layout.addLayout(header)
     body = QHBoxLayout(); body.setSpacing(22)
     window.dashboard = Dashboard(window); body.addWidget(window.dashboard, 1)
@@ -408,7 +409,7 @@ def build_workspace(window):
     window.dorm_provider.currentIndexChanged.connect(window.dorm_provider_changed)
     settings.addLayout(form)
     settings.addSpacing(4)
-    window.enabled = CheckBox("自动检查并认证"); window.autostart = CheckBox("登录 Mac 后启动")
+    window.enabled = CheckBox("自动检查并认证"); window.autostart = CheckBox(startup_text())
     settings.addStretch(1)
     scroll.setWidget(config_body); config_box.addWidget(scroll, 1)
     switches = QHBoxLayout(); switches.setSpacing(18)
@@ -423,7 +424,7 @@ def build_workspace(window):
     links = QHBoxLayout(); links.addWidget(button("打开登录页", window.open_portal, "quiet")); links.addWidget(button("配置文件夹", window.open_folder, "quiet")); links.addStretch()
     config_box.addLayout(links)
     body.addWidget(config_card); layout.addLayout(body, 1)
-    footer = QHBoxLayout(); footer.addWidget(label("●  关闭窗口后继续在菜单栏运行", "muted")); footer.addStretch()
+    footer = QHBoxLayout(); footer.addWidget(label("●  " + background_text(), "muted")); footer.addStretch()
     footer.addWidget(label(f"v{__version__} · 网络逻辑保持不变", "muted")); footer.addWidget(button("退出助手", window.quit_app, "quiet"))
     layout.addLayout(footer)
     window.setCentralWidget(root)

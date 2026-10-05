@@ -22,6 +22,7 @@ from campus_assistant.service import CampusService
 from campus_assistant.scheduler import PollScheduler
 from campus_assistant.audit import record_event
 from campus_assistant.dashboard import build_workspace, countdown_remaining
+from campus_assistant.platform_ui import platform_name
 
 
 class Worker(QObject):
@@ -50,7 +51,7 @@ class Worker(QObject):
 class Window(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("校园网助手 · v" + __version__ + " · macOS 界面预览 · 实时倒计时")
+        self.setWindowTitle("校园网助手 · v" + __version__ + " · " + platform_name())
         self.resize(520, 470)
         self.fields: dict[str, QLineEdit] = {}
         self.running = False
@@ -491,15 +492,8 @@ class Window(QMainWindow):
             else:
                 path.unlink(missing_ok=True)
         elif os.name == "nt":
-            import winreg
-            key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run")
-            try:
-                name = "CampusNetworkAssistant"
-                if enabled: winreg.SetValueEx(key, name, 0, winreg.REG_SZ, f'"{sys.executable}" "{Path(sys.argv[0]).resolve()}"')
-                else:
-                    try: winreg.DeleteValue(key, name)
-                    except FileNotFoundError: pass
-            finally: winreg.CloseKey(key)
+            from campus_assistant.windows_startup import set_startup
+            set_startup(enabled)
 
 
 def run_gui() -> int:

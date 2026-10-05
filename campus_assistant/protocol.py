@@ -137,6 +137,11 @@ class BoundedHttp:
     @staticmethod
     def _worker_command():
         if getattr(sys, "frozen", False):
+            if sys.platform == "win32":
+                worker = Path(sys.executable).resolve().parent / "http-worker" / "campus-http-worker.exe"
+                if not worker.is_file():
+                    raise PortalError("网络请求工作程序缺失，请完整解压应用包")
+                return [str(worker)]
             return [sys.executable, "--http-worker"]
         return [sys.executable, str(Path(__file__).resolve().parents[1] / "main.py"), "--http-worker"]
 

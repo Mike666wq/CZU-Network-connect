@@ -1,0 +1,157 @@
+{
+  "date": "2026-10-05",
+  "environment": {
+    "cpu": "Apple M1",
+    "ram_gib": 8,
+    "os": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "arch": "arm64"
+  },
+  "scope": "native packaged macOS GUI; loopback-only requests; excludes external observer",
+  "sampling_interval_seconds": 0.2,
+  "memory_units": "MiB = 1048576 bytes",
+  "cpu_units": "100 percent = one CPU core",
+  "baseline": {
+    "duration_seconds": 60.07,
+    "loopback_requests": 6,
+    "auth_requests": 0,
+    "phases": {
+      "active_checks": {
+        "samples": 70,
+        "rss_median_mib": 218.14,
+        "rss_peak_mib": 273.64,
+        "cpu_mean_percent": 8.938,
+        "cpu_peak_percent": 92.6,
+        "max_processes": 3
+      },
+      "complete": {
+        "samples": 2,
+        "rss_median_mib": 217.77,
+        "rss_peak_mib": 217.77,
+        "cpu_mean_percent": 0.783,
+        "cpu_peak_percent": 1.567,
+        "max_processes": 2
+      },
+      "hidden_after_checks": {
+        "samples": 70,
+        "rss_median_mib": 218.09,
+        "rss_peak_mib": 273.52,
+        "cpu_mean_percent": 0.328,
+        "cpu_peak_percent": 6.692,
+        "max_processes": 3
+      },
+      "hidden_idle": {
+        "samples": 69,
+        "rss_median_mib": 217.95,
+        "rss_peak_mib": 218.08,
+        "cpu_mean_percent": 0.295,
+        "cpu_peak_percent": 5.755,
+        "max_processes": 2
+      },
+      "startup": {
+        "samples": 16,
+        "rss_median_mib": 63.22,
+        "rss_peak_mib": 116.88,
+        "cpu_mean_percent": 14.757,
+        "cpu_peak_percent": 98.959,
+        "max_processes": 1
+      },
+      "visible_idle": {
+        "samples": 47,
+        "rss_median_mib": 217.92,
+        "rss_peak_mib": 217.94,
+        "cpu_mean_percent": 0.489,
+        "cpu_peak_percent": 2.013,
+        "max_processes": 2
+      },
+      "warmup": {
+        "samples": 23,
+        "rss_median_mib": 221.42,
+        "rss_peak_mib": 272.77,
+        "cpu_mean_percent": 13.781,
+        "cpu_peak_percent": 111.9,
+        "max_processes": 3
+      }
+    },
+    "hidden_idle_footprint_mib": 95.255
+  },
+  "optimized": {
+    "duration_seconds": 106.47,
+    "loopback_requests": 36,
+    "auth_requests": 0,
+    "phases": {
+      "active_checks": {
+        "samples": 70,
+        "rss_median_mib": 169.62,
+        "rss_peak_mib": 223.95,
+        "cpu_mean_percent": 6.587,
+        "cpu_peak_percent": 89.966,
+        "max_processes": 2
+      },
+      "complete": {
+        "samples": 1,
+        "rss_median_mib": 169.7,
+        "rss_peak_mib": 169.7,
+        "cpu_mean_percent": 2.941,
+        "cpu_peak_percent": 2.941,
+        "max_processes": 1
+      },
+      "hidden_after_checks": {
+        "samples": 70,
+        "rss_median_mib": 169.64,
+        "rss_peak_mib": 223.84,
+        "cpu_mean_percent": 0.425,
+        "cpu_peak_percent": 7.086,
+        "max_processes": 2
+      },
+      "hidden_idle": {
+        "samples": 70,
+        "rss_median_mib": 169.42,
+        "rss_peak_mib": 169.78,
+        "cpu_mean_percent": 0.228,
+        "cpu_peak_percent": 3.294,
+        "max_processes": 1
+      },
+      "repeated_checks": {
+        "samples": 217,
+        "rss_median_mib": 223.72,
+        "rss_peak_mib": 224.02,
+        "cpu_mean_percent": 9.102,
+        "cpu_peak_percent": 95.391,
+        "max_processes": 2
+      },
+      "startup": {
+        "samples": 3,
+        "rss_median_mib": 57.58,
+        "rss_peak_mib": 92.83,
+        "cpu_mean_percent": 52.766,
+        "cpu_peak_percent": 98.728,
+        "max_processes": 1
+      },
+      "visible_idle": {
+        "samples": 47,
+        "rss_median_mib": 169.5,
+        "rss_peak_mib": 169.55,
+        "cpu_mean_percent": 0.477,
+        "cpu_peak_percent": 2.799,
+        "max_processes": 1
+      },
+      "warmup": {
+        "samples": 24,
+        "rss_median_mib": 169.56,
+        "rss_peak_mib": 223.27,
+        "cpu_mean_percent": 9.656,
+        "cpu_peak_percent": 88.618,
+        "max_processes": 2
+      }
+    },
+    "hidden_idle_footprint_mib": 74.284,
+    "soak_cycles": 30,
+    "remaining_http_children_at_finish": 0
+  },
+  "caveats": [
+    "RSS sums may double-count shared pages; footprint and RSS are different metrics.",
+    "Native packaged macOS app, local HTTP fixture; no external HTTPS or real campus authentication.",
+    "Idle windows measured for approximately 14 seconds each; repeated-request extension lasted approximately 45 seconds.",
+    "Measured values are not universal maximums or proof of zero long-term memory leaks."
+  ]
+}

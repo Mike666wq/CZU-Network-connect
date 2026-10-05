@@ -1,0 +1,8 @@
+# Keep repository text normalized; restore Windows script line endings on checkout.
+* text=auto
+*.py text eol=lf
+*.sh text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.csv text eol=lf
+*.ps1 text eol=crlf

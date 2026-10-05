@@ -1,0 +1,16 @@
+version,phase,RSS_median_MiB,RSS_peak_MiB,CPU_mean_percent,CPU_peak_percent,max_processes,samples
+baseline,active_checks,218.14,273.64,8.938,92.6,3,70
+baseline,complete,217.77,217.77,0.783,1.567,2,2
+baseline,hidden_after_checks,218.09,273.52,0.328,6.692,3,70
+baseline,hidden_idle,217.95,218.08,0.295,5.755,2,69
+baseline,startup,63.22,116.88,14.757,98.959,1,16
+baseline,visible_idle,217.92,217.94,0.489,2.013,2,47
+baseline,warmup,221.42,272.77,13.781,111.9,3,23
+optimized,active_checks,169.62,223.95,6.587,89.966,2,70
+optimized,complete,169.7,169.7,2.941,2.941,1,1
+optimized,hidden_after_checks,169.64,223.84,0.425,7.086,2,70
+optimized,hidden_idle,169.42,169.78,0.228,3.294,1,70
+optimized,repeated_checks,223.72,224.02,9.102,95.391,2,217
+optimized,startup,57.58,92.83,52.766,98.728,1,3
+optimized,visible_idle,169.5,169.55,0.477,2.799,1,47
+optimized,warmup,169.56,223.27,9.656,88.618,2,24

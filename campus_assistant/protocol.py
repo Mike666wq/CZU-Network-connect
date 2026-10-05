@@ -143,7 +143,8 @@ class BoundedHttp:
                     raise PortalError("网络请求工作程序缺失，请完整解压应用包")
                 return [str(worker)]
             if sys.platform == "darwin":
-                worker = Path(sys.executable).resolve().parent / "http-worker" / "campus-http-worker"
+                worker = (Path(sys.executable).resolve().parent.parent / "Helpers" /
+                          "campus-http-worker.app" / "Contents" / "MacOS" / "campus-http-worker")
                 if not worker.is_file():
                     raise PortalError("网络请求工作程序缺失，请完整解压应用包")
                 return [str(worker)]

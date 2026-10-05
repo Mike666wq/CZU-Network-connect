@@ -42,7 +42,7 @@ def allowed_source_files(root=ROOT):
             relative=path.relative_to(root)
             if any(p.startswith('.') and p!='.github' or p in {'__pycache__','.cache'} for p in relative.parts):continue
             if path.name in PRIVATE_NAMES or path.name.startswith(('events.','.env','config.')) or path.suffix in {'.log','.pyc','.png','.key','.pem','.p12','.pfx'}:continue
-            if path.suffix not in {'.py','.md','.txt','.json','.csv','.yml','.yaml'}:continue
+            if path.suffix not in {'.py','.md','.txt','.json','.csv','.yml','.yaml','.spec'}:continue
             files.append(path)
     return sorted(set(files))
 
@@ -136,7 +136,7 @@ def mac_assets(app: Path, output: Path, smoke: Path, build_metadata: Path):
     if sys.platform != 'darwin':
         raise ValueError('Mac assets must be produced on a native macOS runner')
     executable = app / 'Contents' / 'MacOS' / APP_NAME
-    worker = app / 'Contents' / 'MacOS' / 'http-worker' / 'campus-http-worker'
+    worker = app / 'Contents' / 'Helpers' / 'campus-http-worker.app' / 'Contents' / 'MacOS' / 'campus-http-worker'
     for binary in (executable, worker):
         architectures = subprocess.check_output(['lipo', '-archs', str(binary)], text=True).split()
         if architectures != ['arm64']:

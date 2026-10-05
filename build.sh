@@ -13,9 +13,9 @@ VERSION=$("$PYTHON" -c 'from campus_assistant import __version__; print(__versio
   --target-architecture arm64 --osx-bundle-identifier io.github.Mike666wq.czu-network-connect main.py
 # A console-enabled stdlib-only helper keeps private stdin/stdout IPC independent
 # from the windowed app's stream handling on CI and end-user machines.
-"$PYTHON" -m PyInstaller --noconfirm --clean --console --noupx --name campus-http-worker \
-  --target-architecture arm64 http_worker.py
-cp -R dist/campus-http-worker 'dist/校园网助手.app/Contents/MacOS/http-worker'
+"$PYTHON" -m PyInstaller --noconfirm --clean tools/mac_http_worker.spec
+mkdir -p 'dist/校园网助手.app/Contents/Helpers'
+cp -R dist/campus-http-worker.app 'dist/校园网助手.app/Contents/Helpers/campus-http-worker.app'
 # Changing the generated plist requires re-signing the bundle; this is not Apple notarization.
 "$PYTHON" - "$VERSION" <<'PY'
 from pathlib import Path

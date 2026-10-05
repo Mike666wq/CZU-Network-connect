@@ -153,9 +153,16 @@ def test_release_versions_match():
 def test_mac_frozen_transport_uses_dedicated_helper(monkeypatch,tmp_path):
     app_dir=tmp_path/'Campus.app'/'Contents'/'MacOS';app_dir.mkdir(parents=True)
     executable=app_dir/'Campus';executable.touch()
-    helper_dir=app_dir/'http-worker';helper_dir.mkdir()
+    helper_dir=app_dir.parent/'Helpers'/'campus-http-worker.app'/'Contents'/'MacOS';helper_dir.mkdir(parents=True)
     helper=helper_dir/'campus-http-worker';helper.touch()
     monkeypatch.setattr(sys,'frozen',True,raising=False)
     monkeypatch.setattr(sys,'platform','darwin')
     monkeypatch.setattr(sys,'executable',str(executable))
     assert BoundedHttp._worker_command()==[str(helper)]
+
+
+def test_mac_helper_is_a_proper_nested_bundle():
+    build=Path('build.sh').read_text()
+    spec=Path('tools/mac_http_worker.spec').read_text()
+    assert 'tools/mac_http_worker.spec' in build and 'Contents/Helpers' in build
+    assert 'console=True' in spec and 'app = BUNDLE' in spec

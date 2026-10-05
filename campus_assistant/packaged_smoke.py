@@ -22,6 +22,7 @@ def run_smoke(output: Path):
 
     output = output.resolve(); output.parent.mkdir(parents=True, exist_ok=True)
     calls = []
+    probe_errors = []
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             if self.path != '/probe':
@@ -35,7 +36,11 @@ def run_smoke(output: Path):
     url = f'http://127.0.0.1:{server.server_port}/probe'
     class SafeService(CampusService):
         def probe_internet(self):
-            status,body,_,_=self.probe_http.get(url)
+            try:
+                status,body,_,_=self.probe_http.get(url)
+            except Exception as exc:
+                probe_errors.append(type(exc).__name__ + ': ' + str(exc))
+                raise
             return status == 204 and not body, 'safe-loopback'
         def identify_portal(self):
             self.portal_known=False
@@ -60,7 +65,7 @@ def run_smoke(output: Path):
     def finish(ok,error=''):
         if completed[0]:return
         completed[0]=True;timer.stop()
-        result.update(ok=ok,error=error,loopback_requests=len(calls))
+        result.update(ok=ok,error=error,loopback_requests=len(calls),probe_errors=probe_errors)
         output.write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
         window.hide();window.timer.stop();window.countdown_timer.stop();app.exit(0 if ok else 1)
     def inspect():

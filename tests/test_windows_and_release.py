@@ -148,3 +148,14 @@ def test_release_versions_match():
     import tomllib
     metadata=tomllib.loads(Path('pyproject.toml').read_text())
     assert metadata['project']['version']==__version__
+
+
+def test_mac_frozen_transport_uses_dedicated_helper(monkeypatch,tmp_path):
+    app_dir=tmp_path/'Campus.app'/'Contents'/'MacOS';app_dir.mkdir(parents=True)
+    executable=app_dir/'Campus';executable.touch()
+    helper_dir=app_dir/'http-worker';helper_dir.mkdir()
+    helper=helper_dir/'campus-http-worker';helper.touch()
+    monkeypatch.setattr(sys,'frozen',True,raising=False)
+    monkeypatch.setattr(sys,'platform','darwin')
+    monkeypatch.setattr(sys,'executable',str(executable))
+    assert BoundedHttp._worker_command()==[str(helper)]

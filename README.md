@@ -4,7 +4,7 @@
 
 面向本校公共区域和宿舍网络的个人桌面工具。识别学校已有的 Dr.COM 认证门户，在需要认证时按页面实际协议提交账号密码；不是绕过认证，也不是通用的跨学校破解工具。
 
-当前版本：**v0.3.3**。软件包由 GitHub Actions 的两套原生环境构建：Mac **M 系列（Apple Silicon）**和 Windows **x64**，不提供 Intel Mac 版或安卓 APK。
+当前版本：**v0.3.4**。软件包由 GitHub Actions 的两套原生环境构建：Mac **M 系列（Apple Silicon）**和 Windows **x64**，不提供 Intel Mac 版或安卓 APK。
 
 [下载与版本发布](https://github.com/Mike666wq/CZU-Network-connect/releases) · [构建状态](https://github.com/Mike666wq/CZU-Network-connect/actions) · [资源占用报告](docs/RESOURCE_USAGE.md) · [发布指南](docs/RELEASING.md)
 
@@ -114,7 +114,7 @@ Remove-Item Env:QT_QPA_PLATFORM
 
 可选本机构建：Mac M 系列运行 `./build.sh`；Windows x64 运行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1`。脚本纯 ASCII；固定 Python 3.12，默认官方 HTTPS PyPI，不关闭 TLS 校验。受管理设备应遵循其执行策略。
 
-Windows 请求程序单独使用控制台子系统打包，但由 GUI 以 `CREATE_NO_WINDOW` 启动，不弹终端窗口，避免无控制台 GUI 缺少 stdin/stdout 的问题。
+两个平台的请求程序均单独以标准输入输出可用的控制台模式打包，主界面始终是窗口应用。Windows 由 GUI 以 `CREATE_NO_WINDOW` 启动，不弹终端窗口；Mac 工作程序在 `.app` 内直接启动，不打开 Terminal。这样避免无控制台 GUI 的 stdin/stdout 环境差异。
 
 ## GitHub 自动构建和 Release
 

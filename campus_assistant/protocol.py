@@ -142,6 +142,11 @@ class BoundedHttp:
                 if not worker.is_file():
                     raise PortalError("网络请求工作程序缺失，请完整解压应用包")
                 return [str(worker)]
+            if sys.platform == "darwin":
+                worker = Path(sys.executable).resolve().parent / "http-worker" / "campus-http-worker"
+                if not worker.is_file():
+                    raise PortalError("网络请求工作程序缺失，请完整解压应用包")
+                return [str(worker)]
             return [sys.executable, "--http-worker"]
         return [sys.executable, str(Path(__file__).resolve().parents[1] / "main.py"), "--http-worker"]
 

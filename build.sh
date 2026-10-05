@@ -11,6 +11,11 @@ VERSION=$("$PYTHON" -c 'from campus_assistant import __version__; print(__versio
 "$PYTHON" -c 'import platform,sys; assert sys.platform == "darwin" and platform.machine() == "arm64", "Build the Mac M-series app on an arm64 macOS host"'
 "$PYTHON" -m PyInstaller --noconfirm --clean --windowed --noupx --name "校园网助手" \
   --target-architecture arm64 --osx-bundle-identifier io.github.Mike666wq.czu-network-connect main.py
+# A console-enabled stdlib-only helper keeps private stdin/stdout IPC independent
+# from the windowed app's stream handling on CI and end-user machines.
+"$PYTHON" -m PyInstaller --noconfirm --clean --console --noupx --name campus-http-worker \
+  --target-architecture arm64 http_worker.py
+cp -R dist/campus-http-worker 'dist/校园网助手.app/Contents/MacOS/http-worker'
 # Changing the generated plist requires re-signing the bundle; this is not Apple notarization.
 "$PYTHON" - "$VERSION" <<'PY'
 from pathlib import Path

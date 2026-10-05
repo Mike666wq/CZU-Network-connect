@@ -136,9 +136,11 @@ def mac_assets(app: Path, output: Path, smoke: Path, build_metadata: Path):
     if sys.platform != 'darwin':
         raise ValueError('Mac assets must be produced on a native macOS runner')
     executable = app / 'Contents' / 'MacOS' / APP_NAME
-    architectures = subprocess.check_output(['lipo', '-archs', str(executable)], text=True).split()
-    if architectures != ['arm64']:
-        raise ValueError('Mac release must be Apple Silicon arm64 only')
+    worker = app / 'Contents' / 'MacOS' / 'http-worker' / 'campus-http-worker'
+    for binary in (executable, worker):
+        architectures = subprocess.check_output(['lipo', '-archs', str(binary)], text=True).split()
+        if architectures != ['arm64']:
+            raise ValueError('Mac app and request helper must be Apple Silicon arm64 only')
     subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app)], check=True)
     with (app/'Contents/Info.plist').open('rb') as handle:
         plist = plistlib.load(handle)

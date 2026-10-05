@@ -7,6 +7,12 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Build both platforms and publish a verified GitHub Release'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -78,7 +84,10 @@ jobs:
           python-version: '3.12'
           architecture: arm64
       - name: Verify M-series runner and tag
+        id: version
         run: |
+          version=$(python -c 'from campus_assistant import __version__; print(__version__)')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
           python -c 'import platform; assert platform.machine() == "arm64", "Mac release requires M-series runner"'
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             python tools/package_release.py verify-tag "$GITHUB_REF_NAME"
@@ -107,7 +116,7 @@ jobs:
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: macos-release
-          path: dist/release-v*-macos/
+          path: dist/release-v${{ steps.version.outputs.version }}-macos/
           if-no-files-found: error
           retention-days: 14
       - name: Upload Mac validation
@@ -124,32 +133,45 @@ jobs:
           retention-days: 7
 
   release:
-    if: startsWith(github.ref, 'refs/tags/') && github.event_name == 'push'
+    if: (startsWith(github.ref, 'refs/tags/') && github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && inputs.publish)
     needs: [windows, macos]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
         with:
           pattern: '*-release'
-          path: release
-          merge-multiple: true
-      - name: Verify both platforms and create Release draft
+          path: artifacts
+          merge-multiple: false
+      - name: Verify original assets, normalize paths, and publish Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
           VERSION: ${{ needs.windows.outputs.version }}
+          BUILD_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
+          TAG="v$VERSION"
+          python3 tools/prepare_release_assets.py --artifacts artifacts --output release --version "$VERSION"
           cd release
-          sha256sum --check SHA256SUMS.txt
-          sha256sum --check SHA256SUMS-macos.txt
-          test "$TAG" = "v$VERSION"
-          cat SHA256SUMS.txt SHA256SUMS-macos.txt > SHA256SUMS-all.txt
+          sha256sum --check SHA256SUMS-all.txt
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            test "$GITHUB_REF_NAME" = "$TAG"
+          fi
+          # Tag exactly the source revision used by BOTH successful platform jobs.
+          if git -C .. rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            test "$(git -C .. rev-parse "$TAG^{commit}")" = "$BUILD_SHA"
+          else
+            gh api --method POST "repos/$GH_REPO/git/refs" -f ref="refs/tags/$TAG" -f sha="$BUILD_SHA"
+          fi
           assets=("campus-network-assistant-v${VERSION}-windows-x64.zip"
                   "campus-network-assistant-v${VERSION}-macos-arm64.zip"
                   "campus-network-assistant-v${VERSION}-source.zip"
@@ -165,3 +187,6 @@ jobs:
             gh release create "$TAG" "${assets[@]}" --verify-tag --draft \
               --title "校园网助手 $TAG · Mac M系列 / Windows" --notes-file release-notes.md
           fi
+          # Only publish after all uploads succeed; keep partial uploads private on errors.
+          gh release edit "$TAG" --draft=false --latest
+          gh release view "$TAG" --json isDraft,url,assets

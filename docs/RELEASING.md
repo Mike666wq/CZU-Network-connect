@@ -10,11 +10,19 @@
 4. 确认版本后推送相同版本的标签，例如：
 
 ```sh
-git tag -a v0.3.4 -m "Campus Network Assistant v0.3.4"
-git push origin v0.3.4
+git tag -a v0.3.5 -m "Campus Network Assistant v0.3.5"
+git push origin v0.3.5
 ```
 
-5. 标签触发两个平台构建，全部成功后生成 Release **草稿**。管理员确认平台验证情况、许可、签名说明和附件完整性，再公开发布。
+5. 标签触发两个平台构建，全部成功后由云端验证原始哈希、上传全部附件，再自动公开 Release。上传完成前保留草稿，失败不会公开不完整版本。
+
+也可一条命令完整重建并发布当前main版本（不需要本地打包或下载产物）：
+
+```sh
+gh workflow run release.yml --repo Mike666wq/CZU-Network-connect --ref main -f publish=true
+```
+
+这个模式在测试完成后给本次构建的准确源码提交创建版本标签；已存在标签必须指向同一提交，否则停止，不覆盖。
 
 不要随意删除／移动已发布版本标签。修正一个已经公开的版本时应升版本并推送新标签，不用 `--force` 覆盖历史。
 
@@ -26,7 +34,7 @@ git push origin v0.3.4
 - `SHA256SUMS-all.txt`。
 - Windows 与 Mac 构建元数据；包括依赖版本、离线测试状态、回环冒烟标记。
 
-Release 默认是草稿，普通访问者看不到；这不是构建失败。主分支构建的Artifacts需要从Actions访问，不是公开Release。
+Release在上传过程中暂为草稿，全部附件上传成功后自动公开。未开启publish的主分支或手动构建只产生Actions Artifacts，不创建公开Release。
 
 ## 验证与发布门槛
 
@@ -44,3 +52,7 @@ Release 默认是草稿，普通访问者看不到；这不是构建失败。主
 ## 本地可做什么
 
 无需本机构建才能发布。推送和打标签后，由GitHub runner完成构建。可在本机运行离线测试并检查源码包内容；不要提交`dist/`、`.venv/`、`.cache/`、`config.json`或`events*.jsonl`。
+
+## Artifact目录处理
+
+Mac上传使用确定的版本目录，不再用通配符保留额外层级。Release下载保留各Artifact独立目录，并由prepare_release_assets.py查找原始manifest和同目录产物，验证后统一目录；原始哈希不匹配直接失败，不重新计算哈希掩盖损坏。操作全部在GitHub runner完成。

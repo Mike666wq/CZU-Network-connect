@@ -4,7 +4,7 @@
 
 面向本校公共区域和宿舍网络的个人桌面工具。识别学校已有的 Dr.COM 认证门户，在需要认证时按页面实际协议提交账号密码；不是绕过认证，也不是通用的跨学校破解工具。
 
-当前版本：**v0.3.4**。软件包由 GitHub Actions 的两套原生环境构建：Mac **M 系列（Apple Silicon）**和 Windows **x64**，不提供 Intel Mac 版或安卓 APK。
+当前版本：**v0.3.5**。软件包由 GitHub Actions 的两套原生环境构建：Mac **M 系列（Apple Silicon）**和 Windows **x64**，不提供 Intel Mac 版或安卓 APK。
 
 [下载与版本发布](https://github.com/Mike666wq/CZU-Network-connect/releases) · [构建状态](https://github.com/Mike666wq/CZU-Network-connect/actions) · [资源占用报告](docs/RESOURCE_USAGE.md) · [发布指南](docs/RELEASING.md)
 
@@ -121,11 +121,17 @@ Remove-Item Env:QT_QPA_PLATFORM
 工作流：[`.github/workflows/release.yml`](.github/workflows/release.yml)。
 
 - 推送 `main`、提交 PR 或手动触发：在 **macos-15 arm64** 和 **windows-2022 x64** 原生 runner 完成测试、打包、冒烟验证，提供 Actions Artifacts。
-- 推送 `vX.Y.Z` 标签：标签必须匹配源码版本。两个平台均成功后自动生成 **Release 草稿**，包含两个应用包、源码包、构建信息和校验值。
-- 校验完成后管理员确认并发布草稿。不会自动覆盖已公开的 Release。
+- 推送 `vX.Y.Z` 标签：标签必须匹配源码版本。两个平台均成功后由云端整理目录、验证原始校验值及打包测试，自动上传并公开发布 Release，包含两个应用包、源码包、构建信息和校验值。
+- 上传完成前使用草稿保护不完整附件，全部成功后自动公开。不会自动覆盖已公开的 Release。
 - 不在本机跨系统伪造 Windows 应用，也不提供 Intel Mac 构建。
 
-详细步骤见 [发布指南](docs/RELEASING.md)。
+手动一条命令也可触发完整云端构建和发布，不需要本地下载／上传：
+
+```sh
+gh workflow run release.yml --repo Mike666wq/CZU-Network-connect --ref main -f publish=true
+```
+
+该模式在两个平台验证后自动给本次测试的源码提交创建版本标签；已存在标签指向不同提交或 Release 已公开时停止，不改写历史。详细步骤见 [发布指南](docs/RELEASING.md)。
 
 ## 目录
 

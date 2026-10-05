@@ -166,3 +166,13 @@ def test_mac_helper_is_a_proper_nested_bundle():
     spec=Path('tools/mac_http_worker.spec').read_text()
     assert 'tools/mac_http_worker.spec' in build and 'Contents/Helpers' in build
     assert 'console=True' in spec and 'app = BUNDLE' in spec
+
+
+def test_build_info_uses_same_platform_names_as_smoke_test(tmp_path,monkeypatch):
+    spec=importlib.util.spec_from_file_location('build_info',Path('tools/windows_build_info.py'))
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    monkeypatch.setattr(sys,'platform','darwin')
+    monkeypatch.setattr(module,'version',lambda name:'test-version')
+    output=tmp_path/'build-info.json'
+    module.write(output,True)
+    assert json.loads(output.read_text())['platform']=='macOS'

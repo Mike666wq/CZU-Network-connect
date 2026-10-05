@@ -5,11 +5,12 @@ import platform
 import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from campus_assistant import __version__
+from campus_assistant.platform_ui import platform_name
 
 
 def write(path, tests_passed):
     packages=('PySide6','psutil','tzdata','pytest','pyinstaller','pyinstaller-hooks-contrib')
-    data={'version':__version__,'platform':'Windows' if sys.platform=='win32' else platform.system(),
+    data={'version':__version__,'platform':platform_name(),
           'architecture':platform.machine(),'python':platform.python_version(),
           'dependencies':{name:version(name) for name in packages},'tests_passed':tests_passed,
           'windows_authenticode_signed':False,'macos_notarized':False,'authentication_tested':'offline fake responses only','version_validation':'source version matches tag' if __import__('os').environ.get('GITHUB_REF','').startswith('refs/tags/') else 'untagged build'}

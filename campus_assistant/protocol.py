@@ -24,6 +24,7 @@ class PortalResult:
     success: bool
     category: str
     message: str
+    detail: str = ""
 
 
 ERRORS = {

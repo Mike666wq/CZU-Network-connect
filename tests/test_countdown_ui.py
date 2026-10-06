@@ -105,9 +105,9 @@ def test_countdown_resets_after_scheduler_reschedules_not_from_fixed_sixty(gui):
     w.scheduler.reschedule(115,300)
     w.supervisor.auth_blocked = True
     w.refresh_countdown(116,WALL)
-    assert w.countdown_value.text() == '299 秒'
+    assert w.countdown_value.text() == '4 分 59 秒'
     assert '仅' not in w.countdown_value.text()
-    assert '仍会检查网络' in w.schedule_label.text()
+    assert '检查网络' in w.schedule_label.text()
 
 
 def test_real_qt_display_timer_updates_without_starting_a_network_check(gui,monkeypatch):
@@ -144,7 +144,13 @@ def test_closing_to_tray_does_not_stop_background_scheduler(gui,monkeypatch):
     assert not w.supervisor.paused
 
 
-def test_scheduler_uses_single_shot_deadline_and_low_frequency_network_fallback(gui):
+def test_scheduler_uses_single_shot_deadline_and_low_frequency_network_fallback(gui, monkeypatch):
+    class DaytimeDateTime:
+        @classmethod
+        def now(cls, tz=None):
+            return WALL if tz is None else WALL.astimezone(tz)
+
+    monkeypatch.setattr(main, 'datetime', DaytimeDateTime)
     w = gui.window
     assert w.timer.isSingleShot()
     assert w.network_poll_timer.interval() == 60_000
@@ -153,3 +159,19 @@ def test_scheduler_uses_single_shot_deadline_and_low_frequency_network_fallback(
     w.arm_scheduler_timer()
     assert w.timer.isActive()
     assert w.timer.remainingTime() > 500_000
+
+
+def test_midnight_recovery_is_visible_as_runtime_status(gui):
+    w = gui.window
+    wall = datetime(2026, 10, 5, 23, 59, 10, tzinfo=TZ)
+    w.scheduler.reschedule(100, 600)
+    w.refresh_countdown(100, wall)
+    visible = [chip.text() for chip in w.dashboard.chip_labels if not chip.isHidden()]
+    assert any('午夜恢复' in text for text in visible)
+    assert '午夜恢复' in w.ui_badge.text()
+    assert w.ui_badge.property('tone') == 'attention'
+
+    fast = datetime(2026, 10, 6, 0, 10, 0, tzinfo=TZ)
+    w.refresh_countdown(100, fast)
+    visible = [chip.text() for chip in w.dashboard.chip_labels if not chip.isHidden()]
+    assert any('午夜恢复 · 30 秒' == text for text in visible)

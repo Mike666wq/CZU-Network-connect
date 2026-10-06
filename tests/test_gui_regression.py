@@ -234,7 +234,9 @@ def test_real_worker_delivers_online_result_to_window(gui):
         time.sleep(0.005)
     assert not window.running
     assert window.supervisor.outcome.state == State.ONLINE
-    assert "互联网已连通" in window.status_label.text()
+    assert window.supervisor.outcome.reason == "online_scene_unknown"
+    assert window.dashboard.headline.text() == "已连接互联网"
+    assert "无需处理" in window.status_label.text()
     assert not window.check_timer.isActive()
 
 
@@ -243,11 +245,11 @@ def test_progress_shows_elapsed_time_and_ignores_old_supervisor(gui):
     window = gui.window
     window.running = True
     window.check_started = time.monotonic() - 21
-    window.check_progress("正在识别校园门户", window.supervisor)
+    window.check_progress("scene", "正在识别校园门户", window.supervisor)
     assert "正在识别校园门户" in window.status_label.text()
     assert "21 秒" in window.status_label.text()
     before = window.status_label.text()
-    window.check_progress("stale", object())
+    window.check_progress("scene", "stale", object())
     assert window.status_label.text() == before
     window.manual_paused = True
     window.update_check_progress()
@@ -289,7 +291,8 @@ def test_scene_signal_switches_form_and_provider_without_changing_shared_credent
     window.scene_identified('dorm', 'http://dorm.test/', window.supervisor)
     assert window.edit_profile.currentData() == 'dorm'
     assert window.fields['portal_url'].text() == 'http://dorm.test/'
-    assert window.active_entrance_label.text() == '当前认证入口：http://dorm.test/'
+    assert window.detected_entrance == 'http://dorm.test/'
+    assert window.active_entrance_label.text() == '认证入口：已确认（仅在需要认证时使用）'
     assert window.dorm_provider.currentData() == '@telecom'
     assert window.form.isRowVisible(window.dorm_provider)
     assert not window.form.isRowVisible(window.fields['public_suffix'])
@@ -331,7 +334,8 @@ def test_explicit_noncurrent_edit_temporarily_disables_form_following(gui):
     assert not window.follow_scene.isChecked()
     window.scene_identified('dorm', 'http://dorm.test/', window.supervisor)
     assert window.edit_profile.currentData() == 'public'
-    assert 'dorm.test' in window.active_entrance_label.text()
+    assert window.detected_entrance == 'http://dorm.test/'
+    assert window.active_entrance_label.text() == '认证入口：已确认（仅在需要认证时使用）'
     window.follow_scene.setChecked(True)
     assert window.edit_profile.currentData() == 'dorm'
 
@@ -380,7 +384,8 @@ def test_real_worker_scene_signal_switches_ui_before_missing_provider_result(gui
     assert window.form.isRowVisible(window.dorm_provider)
     assert window.fields['username'].text() == 'shared-user'
     assert window.fields['password'].text() == 'shared-secret'
-    assert window.active_entrance_label.text() == '当前认证入口：http://dorm.test/'
+    assert window.detected_entrance == 'http://dorm.test/'
+    assert window.active_entrance_label.text() == '认证入口：已确认（仅在需要认证时使用）'
     assert not window.service.auth_submitted
 
     # Save selected provider and repeat through the real worker and fresh service.
@@ -432,3 +437,20 @@ def test_network_change_while_paused_does_not_start_worker(gui):
     w.handle_network_change("changed-network")
     assert gui.starts == []
     assert w.next_reason == "network"
+
+
+def test_password_fields_have_non_destructive_visibility_toggle(gui):
+    window = gui.window
+    field = window.fields['password']
+    action = window.password_actions['password']
+    field.setText('secret-value')
+
+    assert field.echoMode() == main.QLineEdit.EchoMode.Password
+    assert action.toolTip() == '显示密码'
+    action.trigger()
+    assert field.echoMode() == main.QLineEdit.EchoMode.Normal
+    assert field.text() == 'secret-value'
+    assert action.toolTip() == '隐藏密码'
+    action.trigger()
+    assert field.echoMode() == main.QLineEdit.EchoMode.Password
+    assert field.text() == 'secret-value'

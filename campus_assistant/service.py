@@ -64,7 +64,7 @@ class CampusService:
         self.portal_settings: dict[str, str] = {}
         self.portal_error = ""
         self.cancel_check = lambda: False
-        self.progress = lambda message: None
+        self.progress = lambda phase, message: None
         self.captive_host = ""
         self.auth_submitted = False
 
@@ -80,7 +80,7 @@ class CampusService:
         for index, url in enumerate(urls, 1):
             if self.cancel_check():
                 return False, "cancelled"
-            self.progress(f"正在检测互联网（探测 {index}/{len(urls)}）")
+            self.progress("probe", f"正在检测互联网（探测 {index}/{len(urls)}）")
             try:
                 status, body, _, final = self.probe_http.get(url)
                 if status in {301, 302, 303, 307, 308}:
@@ -170,7 +170,7 @@ class CampusService:
         self.scene_attempts: list[dict[str, str]] = []
         names = ("public", "dorm") if self.auto_mode else (self.profile_name,)
         for name in names:
-            self.progress("正在识别" + ("公共网门户" if name == "public" else "宿舍网门户"))
+            self.progress("scene", "正在识别" + ("公共网门户" if name == "public" else "宿舍网门户"))
             if self._identify_one(name):
                 self.portal_error = ""
                 return True
@@ -199,7 +199,7 @@ class CampusService:
         """Read-only: never loads credentials or invokes an authentication endpoint."""
         if not self.portal_known or self.profile_name not in {"public", "dorm"}:
             return PortalResult(False, "unsupported", "校园门户身份尚未确认，未发送凭据")
-        self.progress("正在查询校园网是否已认证")
+        self.progress("config", "正在查询校园网是否已认证")
         callback = "dr" + uuid.uuid4().hex[:8]
         try:
             origin = f"{urlsplit(self.final_url).scheme}://{self.portal_host}"
@@ -228,7 +228,7 @@ class CampusService:
             "wlan_ac_ip": self._b64(self.runtime["ac_ip"]), "wlan_ap_mac": self.runtime["ap_mac"],
             "gw_id": self.runtime["gw_id"]})
         self.portal_settings = {}
-        self.progress("正在读取校园门户登录配置")
+        self.progress("config", "正在读取校园门户登录配置")
         try:
             status, data, config_charset, final = self.http.get(self.portal_api + "page/loadConfig?" + urlencode(params))
             if status != 200 or urlsplit(final).hostname != self.portal_host:
@@ -244,13 +244,16 @@ class CampusService:
                       "account_suffix": "", "account_prefix": "0" if self.profile_name == "dorm" else "1", "io_mode": "0"}
             for key, expected in wanted.items():
                 if str(settings.get(key, "")) != expected:
-                    return PortalResult(False, "configuration", f"门户参数 {key} 与已验证设置不同，已阻止登录")
+                    return PortalResult(False, "configuration",
+                                        f"门户参数 {key} 与已验证设置不同，已阻止登录",
+                                        "portal_protocol_mismatch")
         except PortalError as exc:
             return PortalResult(False, "temporary", "读取门户配置失败：" + self._safe_error(exc) + "；未发送凭据")
         if status != 200 or self.http.last_headers.get("Location"):
             return PortalResult(False, "unknown", "门户配置响应异常")
         if "program_index" not in self.portal_settings:
-            return PortalResult(False, "configuration", "门户未提供 program_index，已阻止登录")
+            return PortalResult(False, "configuration", "门户未提供 program_index，已阻止登录",
+                                "portal_protocol_mismatch")
         return PortalResult(True, "config_loaded", "门户配置已读取并验证")
 
     def authenticate(self) -> PortalResult:
@@ -269,16 +272,21 @@ class CampusService:
             allowed = {value for _, value in DORM_PROVIDERS if value != "-1"}
             confirmed = profile.get("provider_confirmed", bool(suffix))
             if not confirmed or suffix not in allowed:
-                return PortalResult(False, "configuration", "请先选择宿舍服务商并保存，未发送凭据")
+                return PortalResult(False, "configuration", "请先选择宿舍服务商并保存，未发送凭据",
+                                    "provider_missing")
             if any(username.endswith(value) and value != suffix for value in allowed if value):
-                return PortalResult(False, "configuration", "账号末尾的服务商与所选服务商不同，未发送凭据")
+                return PortalResult(False, "configuration",
+                                    "账号末尾的服务商与所选服务商不同，未发送凭据",
+                                    "provider_mismatch")
         if not username.strip() or not password:
-            return PortalResult(False, "configuration", "请先填写账号和密码；未发送凭据")
+            return PortalResult(False, "configuration", "请先填写账号和密码；未发送凭据",
+                                "credentials_missing")
         config_result = self.load_portal_config()
         if not config_result.success:
             return config_result
         if not self.runtime.get("ip") or self.runtime["ip"] == "0.0.0.0":
-            return PortalResult(False, "configuration", "门户未提供有效 IPv4 地址，已阻止登录")
+            return PortalResult(False, "configuration", "门户未提供有效 IPv4 地址，已阻止登录",
+                                "portal_ipv4_missing")
         # Desktop app uses the observed PC form factor.
         term = "1"
         encode = lambda key: self._b64(self.runtime[key])
@@ -296,7 +304,7 @@ class CampusService:
         }
         params = self._common_jsonp(params)
         if self.cancel_check(): return PortalResult(False, "cancelled", "网络已切换")
-        self.progress("正在提交校园网认证")
+        self.progress("auth", "正在提交校园网认证")
         self.auth_submitted = True
         # Credentials are sent once, to the exact observed portal host, with redirects disabled.
         url = self.portal_api + "login?" + urlencode(params)

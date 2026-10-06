@@ -29,6 +29,7 @@ class Outcome:
     message: str
     next_seconds: int
     notify: bool = False
+    reason: str = ""
 
 
 def _beijing_time(now: datetime) -> time:
@@ -71,10 +72,11 @@ class Supervisor:
                  authenticate: Callable[[], PortalResult],
                  now: Callable[[], datetime] = lambda: datetime.now(ZoneInfo("Asia/Shanghai"))):
         self.probe, self.identify_portal, self.authenticate, self.now = probe, identify_portal, authenticate, now
-        self.progress: Callable[[str], None] = lambda message: None
+        self.progress: Callable[[str, str], None] = lambda phase, message: None
         self.scene_changed: Callable[[str, str], None] = lambda name, entrance: None
         self.blocked_scene = ""
         self.blocked_state = State.AUTH_BLOCKED
+        self.blocked_reason = "account"
         self.blocked_message = "认证已暂停；请修正账号或配置后点重试"
         self._active_generation = 0
         self._scene_generation = None
@@ -82,7 +84,7 @@ class Supervisor:
         if service is not None and hasattr(service, "set_cancel_check"):
             service.set_cancel_check(lambda: self.paused or self.generation != self._active_generation)
         if service is not None and hasattr(service, "progress"):
-            service.progress = lambda message: self.progress(message)
+            service.progress = lambda phase, message: self.progress(phase, message)
         self.lock = Lock()
         self.cancel = Event()
         self.paused = False
@@ -93,7 +95,7 @@ class Supervisor:
         self.offline_count = 0
         self.last_network_id: str | None = None
         self.generation = 0
-        self.outcome = Outcome(State.WAITING, "等待检查", 600)
+        self.outcome = Outcome(State.WAITING, "等待检查", 600, reason="waiting")
 
     def set_paused(self, value: bool) -> None:
         self.paused = value
@@ -123,7 +125,7 @@ class Supervisor:
             return self.outcome
         try:
             if not self.enabled or self.paused:
-                self.outcome = Outcome(State.PAUSED, "自动检查已暂停", 60)
+                self.outcome = Outcome(State.PAUSED, "自动检查已暂停", 60, reason="paused")
                 return self.outcome
             if force:
                 self._scene_generation = None
@@ -134,12 +136,12 @@ class Supervisor:
             generation = self.generation
             self._active_generation = generation
             self.cancel.clear()
-            self.outcome = Outcome(State.CHECKING, "正在检查网络", 60)
+            self.outcome = Outcome(State.CHECKING, "正在检查网络", 60, reason="checking")
             service = getattr(self.authenticate, "__self__", None)
             if service is not None and hasattr(service, "auth_submitted"):
                 service.auth_submitted = False
             try:
-                self.progress("正在检测互联网")
+                self.progress("probe", "正在检测互联网")
                 online, _network = self.probe()
                 if generation != self.generation or self.paused:
                     return self.outcome
@@ -148,7 +150,7 @@ class Supervisor:
                     scene_ok = False
                     inspector = getattr(service, "inspect_connected_scene", None)
                     if inspector is not None and self._scene_generation != generation:
-                        self.progress("公网探测已通过，正在按顺序识别校园场景")
+                        self.progress("scene", "公网探测已通过，正在按顺序识别校园场景")
                         scene_ok = bool(inspector())
                         if scene_ok:
                             self._scene_generation = generation
@@ -164,14 +166,17 @@ class Supervisor:
                         message = f"互联网可用；当前场景：{scene}；本轮未提交校园登录"
                     else:
                         message = "互联网可用；公共网和宿舍网入口均未识别，可能不在校园网"
-                    self.outcome = Outcome(State.ONLINE, message, interval_for(self.now(), True))
+                    reason = "online_scene_known" if scene_ok else "online_scene_unknown"
+                    self.outcome = Outcome(State.ONLINE, message, interval_for(self.now(), True), reason=reason)
                     return self.outcome
                 self.offline_count += 1
-                self.progress("正在识别校园门户")
+                self.progress("scene", "正在识别校园门户")
                 if not self.identify_portal():
                     service = getattr(self.identify_portal, "__self__", None)
                     message = getattr(service, "portal_error", "") or "未识别到受支持的校园门户，未发送凭据"
-                    self.outcome = Outcome(State.WAITING, message, interval_for(self.now(), False, self.offline_count))
+                    self.outcome = Outcome(State.WAITING, message,
+                                           interval_for(self.now(), False, self.offline_count),
+                                           reason="portal_unidentified")
                     return self.outcome
                 if generation != self.generation or self.paused:
                     return self.outcome
@@ -182,16 +187,17 @@ class Supervisor:
                     self.auth_notice_sent = False
                 if self.auth_blocked and not force:
                     self.outcome = Outcome(self.blocked_state, self.blocked_message,
-                                           interval_for(self.now(), False, self.offline_count, blocked=True))
+                                           interval_for(self.now(), False, self.offline_count, blocked=True),
+                                           reason=self.blocked_reason)
                     return self.outcome
-                self.progress("正在读取门户配置并检查认证状态")
+                self.progress("config", "正在读取门户配置并检查认证状态")
                 result = self.authenticate()
                 if generation != self.generation or self.paused:
                     return self.outcome
                 if result.success:
                     self.unknown_count = 0
                     # Portal success is not proof of Internet reachability.
-                    self.progress("正在验证互联网是否连通")
+                    self.progress("verify", "正在验证互联网是否连通")
                     online_after, _ = self.probe()
                     if generation != self.generation or self.paused:
                         return self.outcome
@@ -199,9 +205,12 @@ class Supervisor:
                     msg = "认证成功且互联网已连通" if online_after else "门户报告认证成功，互联网仍不可用"
                     if online_after:
                         self.offline_count = 0
-                    self.outcome = Outcome(state, msg, interval_for(self.now(), online_after, self.offline_count))
+                    reason = "authenticated" if online_after else "authenticated_no_internet"
+                    self.outcome = Outcome(state, msg,
+                                           interval_for(self.now(), online_after, self.offline_count),
+                                           reason=reason)
                 elif result.category == "already_online":
-                    self.progress("正在验证互联网是否连通")
+                    self.progress("verify", "正在验证互联网是否连通")
                     online_after, _ = self.probe()
                     if generation != self.generation or self.paused:
                         return self.outcome
@@ -209,32 +218,38 @@ class Supervisor:
                     message = "账号此前已认证且互联网已连通" if online_after else "校园网报告已认证；公网探测未通过，未重复登录"
                     if online_after:
                         self.offline_count = 0
+                    reason = "already_online" if online_after else "already_online_no_internet"
                     self.outcome = Outcome(State.ONLINE if online_after else State.PORTAL, message,
-                                           interval_for(self.now(), online_after, self.offline_count))
+                                           interval_for(self.now(), online_after, self.offline_count),
+                                           reason=reason)
                 elif result.category in {"configuration", "account", "disabled", "debt"}:
                     self.auth_blocked = True
                     self.blocked_scene = getattr(service, "profile_name", "")
                     self.blocked_state = State.NEEDS_CONFIG if result.category == "configuration" else State.AUTH_BLOCKED
+                    self.blocked_reason = result.detail or result.category
                     self.blocked_message = result.message
                     notice = not self.auth_notice_sent
                     self.auth_notice_sent = True
                     self.outcome = Outcome(self.blocked_state, result.message,
-                                           interval_for(self.now(), False, self.offline_count, blocked=True), notice)
+                                           interval_for(self.now(), False, self.offline_count, blocked=True),
+                                           notice, reason=result.detail or result.category)
                 elif result.category == "unsupported":
                     self.outcome = Outcome(State.NEEDS_CONFIG, result.message,
-                                           interval_for(self.now(), False, self.offline_count, blocked=True))
+                                           interval_for(self.now(), False, self.offline_count, blocked=True),
+                                           reason=result.detail or "unsupported")
                 elif result.category == "unknown":
                     self.unknown_count += 1
                     delay = 300 if self.unknown_count >= 3 else interval_for(self.now(), False, self.offline_count)
-                    self.outcome = Outcome(State.ERROR, "门户返回未知结果", delay)
+                    self.outcome = Outcome(State.ERROR, "门户返回未知结果", delay, reason="unknown")
                 else:
                     self.outcome = Outcome(State.ERROR, result.message,
-                                           interval_for(self.now(), False, self.offline_count))
+                                           interval_for(self.now(), False, self.offline_count),
+                                           reason=result.category or "temporary")
             except Exception:
                 self.unknown_count += 1
                 self.offline_count = max(1, self.offline_count)
                 delay = 300 if self.unknown_count >= 3 else interval_for(self.now(), False, self.offline_count)
-                self.outcome = Outcome(State.ERROR, "检查遇到暂时故障", delay)
+                self.outcome = Outcome(State.ERROR, "检查遇到暂时故障", delay, reason="exception")
             return self.outcome
         finally:
             self.lock.release()

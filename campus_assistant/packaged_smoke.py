@@ -79,7 +79,7 @@ def run_smoke(output: Path):
             assert calls,'Production HTTP worker did not reach loopback server'
             assert not window.service.auth_submitted
             assert window.countdown_timer.isActive()
-            assert '秒' in window.countdown_value.text()
+            assert any(unit in window.countdown_value.text() for unit in ('秒', '分钟'))
             assert platform_name() in window.windowTitle()
             # Render dorm layout with an isolated draft, without invoking an auth endpoint.
             window.ui_profiles['dorm'].update(provider_suffix='@cmcc',provider_confirmed=True)

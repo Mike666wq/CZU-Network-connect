@@ -98,7 +98,9 @@ def test_hard_failure_still_checks_internet_but_never_resubmits():
 def test_unknown_backoff_after_three_and_success_resets_counter():
     values = iter([PortalResult(False, "unknown", "x")] * 3 + [PortalResult(True, "success", "ok")])
     probes = iter([(False, "wifi")] * 4 + [(False, "wifi")])
-    sup = Supervisor(lambda: next(probes), lambda: True, lambda: next(values))
+    daytime = datetime(2026, 10, 5, 12, tzinfo=ZoneInfo("Asia/Shanghai"))
+    sup = Supervisor(lambda: next(probes), lambda: True, lambda: next(values),
+                     now=lambda: daytime)
     assert sup.check().next_seconds == 30
     assert sup.check().next_seconds == 60
     assert sup.check().next_seconds == 300
@@ -164,9 +166,11 @@ def test_progress_reports_read_only_online_check_without_authentication():
     phases = []
     sup = Supervisor(lambda: (True, "wifi"), lambda: pytest.fail("portal not needed"),
                      lambda: pytest.fail("authentication not needed"))
-    sup.progress = phases.append
-    assert sup.check().state == State.ONLINE
-    assert phases == ["正在检测互联网"]
+    sup.progress = lambda phase, message: phases.append((phase, message))
+    outcome = sup.check()
+    assert outcome.state == State.ONLINE
+    assert outcome.reason == "online_scene_unknown"
+    assert phases == [("probe", "正在检测互联网")]
 
 
 def test_legacy_public_selection_is_migrated_to_auto(tmp_path):

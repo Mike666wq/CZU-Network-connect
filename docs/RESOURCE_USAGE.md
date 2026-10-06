@@ -93,3 +93,14 @@ PyInstaller 默认 Qt 插件会间接带入 QML、Quick、Pdf、VirtualKeyboard�
 长测运行约 104.47 秒，共完成 36 次回环请求，其中末段 30 次为连续检查；auth_requests=0，结束时没有遗留 HTTP 子进程。Qt 裁剪的确定收益是发布体积；运行时内存数据有改善迹象，但 footprint 与短窗口 CPU 在不同运行间波动明显，因此不把它们宣传为稳定百分比收益。Scheduler 2.0 的主要运行时收益来自减少真实日常场景中的唤醒和公网请求次数，而这个 profiler 会主动触发检查，不适合用来量化“10 分钟心跳”带来的长期 CPU 节省。
 
 最终验收：153 项测试和 2 项子测试通过；正式裁剪后的 macOS frozen smoke test通过，确认使用 campus-http-worker 完成回环请求；codesign --verify --deep --strict 通过。正式构建包未包含被裁剪的 10 组 Qt framework 链。
+
+
+## v0.3.8：UI / UX 重构验收
+
+本轮不改变校园认证协议与请求参数，重点重构展示语义和交互层：引入独立 Presentation Model，以结构化 State / reason 驱动标题、严重程度、流程节点、状态 Chip 和上下文操作；主界面改为“状态 / 设置 / 记录”三页结构，技术 Portal 参数默认收进高级设置。
+
+状态页保留五步业务流程，但减少重复信息；认证失败与一般待配置明确区分为红色失败 / amber 待处理。午夜恢复窗口会直接显示当前 60 秒或 30 秒节奏。设置页增加密码显隐、未保存状态、异常字段定向高亮和精确跳转；后台检查不会主动抢占用户当前页面。
+
+跨平台窗口与字体策略：macOS 默认 940×720、最小 820×700；Windows 默认 960×740、最小 840×700。macOS 使用 Apple System Font / PingFang SC，Windows 使用 Microsoft YaHei UI / Segoe UI；三页分别支持 Command+1/2/3 与 Ctrl+1/2/3 快捷键。
+
+最终验收：**168 项测试和 2 项子测试通过**；macOS 原生 App 重新构建、codesign 校验与 frozen packaged smoke test 均通过。裁剪后 .app 展开体积仍约 **94 MiB**，未重新引入 QML / Quick / Pdf / VirtualKeyboard / Svg / OpenGL 功能链。本轮没有重新测量 Windows 运行时资源，因此不以 Mac 数据推断 Windows 内存或 CPU 表现。

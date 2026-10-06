@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFormLayout, 
 
 from campus_assistant import __version__
 from campus_assistant.config import APP_DIR, CONFIG_PATH, DORM_PROVIDERS, ConfigError, load_config, save_config
-from campus_assistant.engine import Outcome, State, Supervisor
+from campus_assistant.engine import Outcome, State, Supervisor, in_midnight_recovery
 from campus_assistant.service import CampusService
 from campus_assistant.scheduler import PollScheduler
 from campus_assistant.audit import record_event
@@ -25,9 +25,17 @@ from campus_assistant.dashboard import build_workspace, countdown_remaining
 from campus_assistant.platform_ui import platform_name
 
 
+def format_countdown(seconds: int) -> str:
+    seconds = max(0, int(seconds))
+    if seconds < 90:
+        return f"{seconds} 秒"
+    minutes, remainder = divmod(seconds, 60)
+    return f"{minutes} 分钟" if remainder == 0 else f"{minutes} 分 {remainder} 秒"
+
+
 class Worker(QObject):
     finished = Signal(object, object)
-    progress = Signal(str, object)
+    progress = Signal(str, str, object)
     scene_identified = Signal(str, str, object)
 
     def __init__(self, supervisor: Supervisor, force: bool = False):
@@ -35,15 +43,15 @@ class Worker(QObject):
 
     @Slot()
     def run(self):
-        self.supervisor.progress = lambda message: self.progress.emit(message, self.supervisor)
+        self.supervisor.progress = lambda phase, message: self.progress.emit(phase, message, self.supervisor)
         self.supervisor.scene_changed = lambda name, entrance: self.scene_identified.emit(name, entrance, self.supervisor)
         try:
             outcome = self.supervisor.check(force=self.force)
         except Exception:
             # Always release the GUI's running state; never expose credentials from exceptions.
-            outcome = Outcome(State.ERROR, "后台检查失败，请点击重试", 30)
+            outcome = Outcome(State.ERROR, "后台检查失败，请点击重试", 30, reason="worker_exception")
         finally:
-            self.supervisor.progress = lambda message: None
+            self.supervisor.progress = lambda phase, message: None
             self.supervisor.scene_changed = lambda name, entrance: None
         self.finished.emit(outcome, self.supervisor)
 
@@ -66,6 +74,7 @@ class Window(QMainWindow):
         self.quit_after_check = False
         self.loading_config = False
         self.syncing_scene = False
+        self.config_dirty = False
         self.detected_scene = ""
         self.detected_entrance = ""
         self.manual_paused = False
@@ -124,6 +133,8 @@ class Window(QMainWindow):
         """Presentation only; uses saved settings and never dispatches network work."""
         if not hasattr(self, "scheduler"):
             return
+        wall = datetime.now(ZoneInfo("Asia/Shanghai")) if now_wall is None else now_wall
+        midnight = in_midnight_recovery(wall)
         if self.quit_after_check:
             value, detail = "退出中", "正在停止后台任务"
         elif not self.config.get("enabled", True):
@@ -136,21 +147,114 @@ class Window(QMainWindow):
             value, detail = "检查中", "本轮结束后重新计时\n正在等待实际响应"
         else:
             monotonic = time.monotonic() if now_monotonic is None else now_monotonic
-            wall = datetime.now(ZoneInfo("Asia/Shanghai")) if now_wall is None else now_wall
             remaining = countdown_remaining(self.scheduler, monotonic, wall)
-            value = f"{remaining} 秒"
+            value = format_countdown(remaining)
             if remaining == 0:
                 detail = "已到检查时间，等待后台调度"
+            elif self.supervisor.auth_blocked and midnight:
+                detail = "认证待处理 · 午夜恢复窗口仍会检查网络"
             elif self.supervisor.auth_blocked:
-                detail = "仍会检查网络 · 认证待处理\n23:58–00:15 午夜恢复窗口"
+                detail = "认证待处理 · 仍会低频检查网络"
+            elif midnight:
+                local = wall.astimezone(ZoneInfo("Asia/Shanghai")) if wall.tzinfo else wall.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
+                cadence = "30 秒" if (local.hour == 0 and local.minute >= 8) else "60 秒"
+                detail = f"午夜恢复模式 · 当前按 {cadence} 节奏检查"
             else:
                 detail = "稳定在线约 10 分钟检查一次\n23:58–00:15 午夜恢复窗口"
         self.countdown_value.setText(value)
         self.schedule_label.setText(detail)
 
+        runtime_midnight = (midnight and not self.quit_after_check and
+                            self.config.get("enabled", True) and not self.invalid_config and
+                            not self.manual_paused and not self.supervisor.paused)
+        if hasattr(self, "dashboard"):
+            if runtime_midnight:
+                local = wall.astimezone(ZoneInfo("Asia/Shanghai")) if wall.tzinfo else wall.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
+                cadence = "30 秒" if (local.hour == 0 and local.minute >= 8) else "60 秒"
+                self.dashboard.set_runtime_chip(("attention", f"午夜恢复 · {cadence}"))
+            else:
+                self.dashboard.set_runtime_chip(None)
+
+        if self.quit_after_check:
+            self.set_runtime_badge("正在退出", "neutral")
+        elif not self.config.get("enabled", True):
+            self.set_runtime_badge("自动守护关闭", "neutral")
+        elif self.invalid_config:
+            self.set_runtime_badge("需要配置", "attention")
+        elif self.manual_paused or self.supervisor.paused:
+            self.set_runtime_badge("已暂停", "neutral")
+        elif runtime_midnight:
+            self.set_runtime_badge("午夜恢复", "attention")
+        elif self.running:
+            self.set_runtime_badge("正在检查")
+        else:
+            self.set_runtime_badge("后台守护")
+
     def build_ui(self):
         self._ui_config_path = CONFIG_PATH
         build_workspace(self)
+
+    def show_page(self, name: str):
+        if not hasattr(self, "page_stack") or name not in self.page_indices:
+            return
+        self.page_stack.setCurrentIndex(self.page_indices[name])
+        for key, item in self.nav_buttons.items():
+            item.setChecked(key == name)
+        if name == "status":
+            self.refresh_countdown()
+
+    def set_runtime_badge(self, text: str, tone: str = "default"):
+        if not hasattr(self, "ui_badge"):
+            return
+        self.ui_badge.setText(platform_name() + " · " + text)
+        self.ui_badge.setProperty("tone", tone)
+        self.ui_badge.style().unpolish(self.ui_badge)
+        self.ui_badge.style().polish(self.ui_badge)
+
+    @staticmethod
+    def _set_attention(widget, tone: str = ""):
+        widget.setProperty("attentionTone", tone)
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+
+    def clear_setting_attention(self):
+        for widget in list(self.fields.values()) + [self.dorm_provider, self.profile]:
+            self._set_attention(widget, "")
+
+    def credential_targets(self):
+        if self.cred_mode.currentData() == "shared":
+            return [self.fields["username"], self.fields["password"]]
+        profile = self.detected_scene if self.detected_scene in {"public", "dorm"} else (
+            self.edit_profile.currentData() or "public")
+        return [self.fields[f"{profile}_username"], self.fields[f"{profile}_password"]]
+
+    def _select_settings_profile(self, name: str):
+        if name not in {"public", "dorm"} or self.edit_profile.currentData() == name:
+            return
+        self.syncing_scene = True
+        try:
+            self.edit_profile.setCurrentIndex(self.edit_profile.findData(name))
+        finally:
+            self.syncing_scene = False
+
+    def open_settings_for_reason(self, reason: str):
+        self.show_page("settings")
+        self.clear_setting_attention()
+        if reason in {"provider_missing", "provider_mismatch"}:
+            self._select_settings_profile("dorm")
+            target = self.dorm_provider
+        elif reason in {"credentials_missing", "account", "debt", "disabled"}:
+            if self.detected_scene in {"public", "dorm"}:
+                self._select_settings_profile(self.detected_scene)
+            target = self.credential_targets()[0]
+        elif reason in {"portal_protocol_mismatch", "portal_ipv4_missing", "unsupported", "invalid_config"}:
+            self.advanced_toggle.setChecked(True)
+            target = self.fields["portal_url"] if reason != "invalid_config" else self.profile
+        else:
+            target = self.profile
+        self._set_attention(target, "error" if reason in {"account", "debt", "disabled"} else "attention")
+        QTimer.singleShot(0, lambda target=target: (
+            self.config_scroll.ensureWidgetVisible(target, 0, 72), target.setFocus()))
 
     def apply_config_to_ui(self):
         cfg = self.config
@@ -167,6 +271,29 @@ class Window(QMainWindow):
         self.last_edit_profile = self.edit_profile.currentData() or "public"
         if self.detected_scene:
             self.sync_scene_editor(self.detected_scene)
+        self.set_config_dirty(False)
+
+    def set_config_dirty(self, dirty: bool):
+        self.config_dirty = bool(dirty)
+        if hasattr(self, "save_button"):
+            self.save_button.setEnabled(self.config_dirty)
+        if hasattr(self, "discard_button"):
+            self.discard_button.setEnabled(self.config_dirty)
+        if hasattr(self, "save_state_label"):
+            self.save_state_label.setText("有未保存的修改" if self.config_dirty else "已保存")
+
+    def mark_config_dirty(self, *_):
+        if self.loading_config or self.syncing_scene:
+            return
+        sender = self.sender()
+        if sender is not None and (
+                sender in self.fields.values() or sender in {self.dorm_provider, self.profile}):
+            self._set_attention(sender, "")
+        self.set_config_dirty(True)
+
+    def discard_changes(self):
+        self.apply_config_to_ui()
+        self.dashboard.add_event("已放弃未保存的设置修改")
 
     def refresh_profile_fields(self):
         name = self.edit_profile.currentData() or "public"
@@ -225,8 +352,8 @@ class Window(QMainWindow):
             return
         changed = (self.detected_scene, self.detected_entrance) != (name, entrance)
         self.detected_scene, self.detected_entrance = name, entrance
-        self.scene_label.setText("当前识别场景：" + {"public": "公共网", "dorm": "宿舍网"}[name])
-        self.active_entrance_label.setText("当前认证入口：" + entrance)
+        self.scene_label.setText("当前场景：" + {"public": "公共网", "dorm": "宿舍网"}[name])
+        self.active_entrance_label.setText("认证入口：已确认（仅在需要认证时使用）")
         self.sync_scene_editor(name)
         if changed and self.follow_scene.isChecked():
             QTimer.singleShot(0, lambda: self.reveal_active_form(worker_supervisor))
@@ -252,13 +379,24 @@ class Window(QMainWindow):
 
     def apply_mode_visibility(self):
         shared = self.cred_mode.currentData() == "shared"
-        for k in ("username", "password"): self.form.setRowVisible(self.fields[k], shared)
         active = self.edit_profile.currentData() or "public"
-        for p in ("public", "dorm"):
-            self.form.setRowVisible(self.fields[f"{p}_username"], not shared and p == active)
-            self.form.setRowVisible(self.fields[f"{p}_password"], not shared and p == active)
-            self.form.setRowVisible(self.fields[f"{p}_suffix"], p == active and p == "public")
-        self.form.setRowVisible(self.dorm_provider, active == "dorm")
+
+        for key in ("username", "password"):
+            self.login_form.setRowVisible(self.fields[key], shared)
+        for profile in ("public", "dorm"):
+            self.login_form.setRowVisible(
+                self.fields[f"{profile}_username"], not shared and profile == active)
+            self.login_form.setRowVisible(
+                self.fields[f"{profile}_password"], not shared and profile == active)
+        self.login_form.setRowVisible(self.dorm_provider, active == "dorm")
+
+        advanced = bool(getattr(self, "advanced_toggle", None) and self.advanced_toggle.isChecked())
+        self.advanced_form.setRowVisible(self.fields["portal_url"], advanced)
+        self.advanced_form.setRowVisible(
+            self.fields["public_suffix"], advanced and active == "public")
+        self.advanced_form.setRowVisible(
+            self.fields["dorm_suffix"], advanced and active == "dorm")
+        self.advanced_form.setRowVisible(self.follow_scene, advanced)
 
     def save(self):
         old_autostart = self.config.get("autostart", False)
@@ -271,8 +409,9 @@ class Window(QMainWindow):
         try:
             save_config(cfg); self.replace_config(load_config())
             self.invalid_config = False
+            self.set_config_dirty(False)
             if cfg["autostart"] != old_autostart: self.apply_autostart(cfg["autostart"])
-            self.set_status(State.WAITING, "配置已保存并生效")
+            self.set_status(State.WAITING, "配置已保存并生效", reason="configuration_saved")
             if not self.manual_paused and not self.running: self.start_check()
         except (ConfigError, OSError) as exc:
             self.invalid_config = True
@@ -298,11 +437,13 @@ class Window(QMainWindow):
             config = load_config()
             self.replace_config(config)
             if config.get("autostart", False) != old_autostart: self.apply_autostart(config.get("autostart", False))
-            self.apply_config_to_ui(); self.set_status(State.WAITING, "已重载配置文件")
+            self.apply_config_to_ui()
+            self.set_status(State.WAITING, "已重载配置文件", reason="configuration_reloaded")
             if not self.manual_paused and not self.running: self.start_check()
         except (ConfigError, OSError) as exc:
             self.invalid_config = True
-            self.supervisor.set_paused(True); self.set_status(State.NEEDS_CONFIG, str(exc))
+            self.supervisor.set_paused(True)
+            self.set_status(State.NEEDS_CONFIG, str(exc), reason="invalid_config")
             QMessageBox.warning(self, "配置文件无效", f"自动认证已暂停，请修正配置文件后再次重载。\n{exc}")
 
     def current_network_signature(self):
@@ -401,11 +542,11 @@ class Window(QMainWindow):
         self.refresh_countdown()
         self.thread.start()
 
-    @Slot(str, object)
-    def check_progress(self, message, worker_supervisor):
+    @Slot(str, str, object)
+    def check_progress(self, phase, message, worker_supervisor):
         if self.running and worker_supervisor is self.supervisor:
             self.check_phase = message
-            self.dashboard.progress(message)
+            self.dashboard.progress(phase, message)
             self.update_check_progress()
 
     @Slot()
@@ -433,11 +574,11 @@ class Window(QMainWindow):
         self.running = False
         if worker_supervisor is self.supervisor:
             if self.invalid_config:
-                self.set_status(State.NEEDS_CONFIG, "配置文件无效，自动检查已暂停")
+                self.set_status(State.NEEDS_CONFIG, "配置文件无效，自动检查已暂停", reason="invalid_config")
             elif self.manual_paused:
-                self.set_status(State.PAUSED, "自动检查已暂停")
+                self.set_status(State.PAUSED, "自动检查已暂停", reason="paused")
             else:
-                self.set_status(outcome.state, outcome.message)
+                self.set_outcome(outcome)
             detected = getattr(self.service, "profile_name", "") if getattr(self.service, "portal_known", False) else ""
             detail = getattr(self.service, "portal_error", "") if not detected else ""
             if detected:
@@ -445,8 +586,8 @@ class Window(QMainWindow):
             elif not self.manual_paused:
                 self.detected_scene = ""
                 self.detected_entrance = ""
-                self.scene_label.setText("当前识别场景：未确认" + ("；" + detail if detail else ""))
-                self.active_entrance_label.setText("当前认证入口：未确认（未提交凭据）")
+                self.scene_label.setText("当前场景：未确认" + ("；" + detail if detail else ""))
+                self.active_entrance_label.setText("认证入口：未确认（未提交凭据）")
             record_event(APP_DIR / "events.jsonl", state=outcome.state.value, scene=detected,
                          next_seconds=outcome.next_seconds,
                          auth_attempted=getattr(self.service, "auth_submitted", False), reason=self.running_reason)
@@ -463,14 +604,35 @@ class Window(QMainWindow):
         if self.pending:
             QTimer.singleShot(0, self.start_check)
 
-    def set_status(self, state, message):
-        self.status_label.setText(f"{state.value}：{message}")
-        self.dashboard.finish(state, message, getattr(self.service, "auth_submitted", False))
-        needs_provider = state == State.NEEDS_CONFIG and "服务商" in message
-        self.dorm_provider.setStyleSheet("border: 1px solid #efc27d;" if needs_provider else "")
+    def set_outcome(self, outcome: Outcome):
+        presentation = self.dashboard.finish(
+            outcome, getattr(self.service, "auth_submitted", False))
+        self.status_label.setText(presentation.detail)
+
+        self.clear_setting_attention()
+        reason = outcome.reason
+        needs_provider = reason in {"provider_missing", "provider_mismatch"}
+        needs_credentials = reason in {"credentials_missing", "account", "debt", "disabled"}
         if needs_provider:
-            QTimer.singleShot(0, lambda: self.reveal_active_form(self.supervisor))
+            self._set_attention(self.dorm_provider, "attention")
+        if needs_credentials:
+            tone = "error" if reason in {"account", "debt", "disabled"} else "attention"
+            for field in self.credential_targets():
+                self._set_attention(field, tone)
+        if reason == "invalid_config":
+            self._set_attention(self.profile, "attention")
+        if reason in {"portal_protocol_mismatch", "portal_ipv4_missing", "unsupported"}:
+            self._set_attention(self.fields["portal_url"], "attention")
+
+        # Background checks must not steal the user's current page. The
+        # presentation's primary action navigates to the exact field on demand.
         self.refresh_countdown()
+        return presentation
+
+    def set_status(self, state, message, *, reason=""):
+        next_seconds = getattr(getattr(self, "supervisor", None), "outcome", None)
+        delay = getattr(next_seconds, "next_seconds", 60)
+        return self.set_outcome(Outcome(state, message, delay, reason=reason))
     def retry(self):
         self.next_reason = "retry"
         if self.running: self.pending = True; self.pending_force = True; return
@@ -483,8 +645,10 @@ class Window(QMainWindow):
         self.supervisor.set_paused(self.manual_paused or self.invalid_config)
         if self.supervisor.paused:
             self.timer.stop()
-        self.set_status(State.PAUSED if self.supervisor.paused else State.WAITING,
-                        "已暂停" if self.supervisor.paused else "已恢复，即将重新检查")
+        self.set_status(
+            State.PAUSED if self.supervisor.paused else State.WAITING,
+            "已暂停" if self.supervisor.paused else "已恢复，即将重新检查",
+            reason="paused" if self.supervisor.paused else "resumed")
         if not self.supervisor.paused:
             self.next_reason = "resume"
             self.start_check()

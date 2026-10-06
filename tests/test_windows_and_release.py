@@ -222,7 +222,9 @@ def test_release_notes_match_scheduler_2_and_current_flow_semantics():
     assert '10 分钟心跳' in notes
     assert '30/60/120/300 秒退避' in notes
     assert '23:58–00:15' in notes
-    assert '未确认 / 无需执行 / 待处理' in notes
+    assert '未确认 / 无需执行 / 待处理 / 失败' in notes
+    assert '状态 / 设置 / 记录' in notes
+    assert 'Command+1/2/3' in notes
 
 
 def test_current_source_package_includes_macos_pruning_tool(tmp_path):
@@ -231,3 +233,19 @@ def test_current_source_package_includes_macos_pruning_tool(tmp_path):
     tool.source_zip(target)
     with ZipFile(target) as archive:
         assert 'Networkconnect/tools/prune_macos_bundle.py' in archive.namelist()
+
+
+def test_cross_platform_ui_metrics_and_shortcuts_are_explicit():
+    from campus_assistant.platform_ui import ui_font_stack, window_metrics, navigation_shortcuts
+
+    assert 'Microsoft YaHei UI' in ui_font_stack('win32')
+    assert 'Segoe UI' in ui_font_stack('win32')
+    assert 'PingFang SC' in ui_font_stack('darwin')
+    assert window_metrics('win32')['default'] == (960, 740)
+    assert window_metrics('win32')['minimum'] == (840, 700)
+    assert window_metrics('darwin')['default'] == (940, 720)
+    assert window_metrics('darwin')['minimum'] == (820, 700)
+    assert navigation_shortcuts('win32') == {
+        'status': 'Ctrl+1', 'settings': 'Ctrl+2', 'records': 'Ctrl+3'}
+    assert navigation_shortcuts('darwin') == {
+        'status': 'Meta+1', 'settings': 'Meta+2', 'records': 'Meta+3'}

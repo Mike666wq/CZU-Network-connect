@@ -10,8 +10,8 @@
 4. 确认版本后推送相同版本的标签，例如：
 
 ```sh
-git tag -a v0.3.5 -m "Campus Network Assistant v0.3.5"
-git push origin v0.3.5
+git tag -a v0.3.6 -m "Campus Network Assistant v0.3.6"
+git push origin v0.3.6
 ```
 
 5. 标签触发两个平台构建，全部成功后由云端验证原始哈希、上传全部附件，再自动公开 Release。上传完成前保留草稿，失败不会公开不完整版本。

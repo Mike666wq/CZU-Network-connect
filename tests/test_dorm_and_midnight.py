@@ -141,7 +141,7 @@ def test_connected_scene_is_detected_without_authentication_and_refreshed_on_swi
 @pytest.mark.parametrize('recover_minute', [6, 10, 12])
 def test_full_midnight_blackout_retries_and_recovers_without_manual_action(recover_minute):
     tz = ZoneInfo('Asia/Shanghai')
-    begin = datetime(2026, 10, 5, 23, 59, 55, tzinfo=tz)
+    begin = datetime(2026, 10, 5, 23, 57, 55, tzinfo=tz)
     midnight = begin.replace(day=6, hour=0, minute=0, second=0)
     recovery = midnight + timedelta(minutes=recover_minute)
     current = [begin]
@@ -171,12 +171,16 @@ def test_full_midnight_blackout_retries_and_recovers_without_manual_action(recov
             outcomes.append((current[0], outcome))
             scheduler.reschedule(seconds, outcome.next_seconds)
 
+    assert begin.replace(hour=23, minute=58, second=0) in checks
     assert midnight in checks and midnight in attempts
-    assert midnight + timedelta(minutes=12) in checks
+    assert midnight + timedelta(minutes=8) in checks
     successes = [stamp for stamp, outcome in outcomes if outcome.state == State.AUTHENTICATED]
     assert successes and successes[0] == recovery
     assert attempts[-1] == recovery  # no login after successful connectivity verification
-    assert all(outcome.next_seconds == 60 for stamp, outcome in outcomes if midnight <= stamp < midnight + timedelta(minutes=10))
+    assert all(outcome.next_seconds == 60 for stamp, outcome in outcomes
+               if midnight <= stamp < midnight + timedelta(minutes=8))
+    assert all(outcome.next_seconds == 30 for stamp, outcome in outcomes
+               if midnight + timedelta(minutes=8) <= stamp < recovery)
 
 
 def test_auto_reports_not_campus_when_public_and_dorm_both_fail():

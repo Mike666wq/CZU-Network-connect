@@ -11,13 +11,22 @@ from campus_assistant.engine import Outcome, State, Supervisor, interval_for
 from campus_assistant.protocol import PortalResult, classify_result, parse_jsonp
 from campus_assistant.scheduler import PollScheduler
 from datetime import timezone
+from zoneinfo import ZoneInfo
 
 
 def test_midnight_and_regular_cadence():
-    assert interval_for(datetime(2026, 10, 5, 0, 0), False) == 60
-    assert interval_for(datetime(2026, 10, 5, 0, 9, 59), False) == 60
-    assert interval_for(datetime(2026, 10, 5, 0, 10), False) == 30
-    assert interval_for(datetime(2026, 10, 5, 12), True) == 60
+    assert interval_for(datetime(2026, 10, 5, 23, 58), True) == 60
+    assert interval_for(datetime(2026, 10, 6, 0, 7, 59), False, 4) == 60
+    assert interval_for(datetime(2026, 10, 6, 0, 8), False, 4) == 30
+    assert interval_for(datetime(2026, 10, 6, 0, 14, 59), True) == 30
+    assert interval_for(datetime(2026, 10, 6, 0, 15), True) == 600
+    assert interval_for(datetime(2026, 10, 5, 12), True) == 600
+
+
+def test_daytime_offline_backoff_and_blocked_heartbeat():
+    stamp = datetime(2026, 10, 5, 12)
+    assert [interval_for(stamp, False, n) for n in range(1, 6)] == [30, 60, 120, 300, 300]
+    assert interval_for(stamp, False, 4, blocked=True) == 600
 
 
 def test_jsonp_parser_never_evaluates_javascript():
@@ -91,7 +100,7 @@ def test_unknown_backoff_after_three_and_success_resets_counter():
     probes = iter([(False, "wifi")] * 4 + [(False, "wifi")])
     sup = Supervisor(lambda: next(probes), lambda: True, lambda: next(values))
     assert sup.check().next_seconds == 30
-    assert sup.check().next_seconds == 30
+    assert sup.check().next_seconds == 60
     assert sup.check().next_seconds == 300
     assert sup.unknown_count == 3
     assert sup.check().state == State.PORTAL
@@ -99,7 +108,9 @@ def test_unknown_backoff_after_three_and_success_resets_counter():
 
 
 def test_temporary_retry_uses_offline_and_midnight_intervals():
-    for stamp, delay in ((datetime(2026, 10, 5, 12), 30), (datetime(2026, 10, 5, 0, 4), 60)):
+    for stamp, delay in ((datetime(2026, 10, 5, 12), 30),
+                         (datetime(2026, 10, 6, 0, 4), 60),
+                         (datetime(2026, 10, 6, 0, 10), 30)):
         sup = Supervisor(lambda: (False, "wifi"), lambda: True,
             lambda: PortalResult(False, "temporary", "稍后重试"), now=lambda: stamp)
         assert sup.check().next_seconds == delay
@@ -118,18 +129,27 @@ def test_pause_during_probe_invalidates_generation_before_auth():
 
 
 def test_poll_scheduler_special_checks_wake_and_network_change():
-    start_wall = datetime(2026, 10, 5, 23, 59, 55, tzinfo=timezone.utc)
+    tz = ZoneInfo("Asia/Shanghai")
+    start_wall = datetime(2026, 10, 5, 23, 57, 55, tzinfo=tz)
     s = PollScheduler(10.0, "wifi-a", start_wall)
-    midnight = s.tick(15, datetime(2026, 10, 6, 0, 0, tzinfo=timezone.utc), "wifi-a", 60)
-    assert midnight.due and midnight.special_time
-    duplicate = s.tick(20, datetime(2026, 10, 6, 0, 0, 5, tzinfo=timezone.utc), "wifi-a", 60)
+    boundary = s.tick(15, datetime(2026, 10, 5, 23, 58, tzinfo=tz), "wifi-a", 60)
+    assert boundary.due and boundary.special_time
+    duplicate = s.tick(20, datetime(2026, 10, 5, 23, 58, 5, tzinfo=tz), "wifi-a", 60)
     assert not duplicate.special_time
-    switch = s.tick(25, datetime(2026, 10, 6, 0, 0, 10, tzinfo=timezone.utc), "wifi-b", 60)
+    switch = s.tick(25, datetime(2026, 10, 5, 23, 58, 10, tzinfo=tz), "wifi-b", 60)
     assert switch.due and switch.network_changed
-    woke = s.tick(30, datetime(2026, 10, 6, 0, 5, tzinfo=timezone.utc), "wifi-b", 60)
+    woke = s.tick(30, datetime(2026, 10, 6, 0, 5, tzinfo=tz), "wifi-b", 60)
     assert woke.woke and woke.due
     s.reschedule(30, 60)
-    assert s.tick(90, datetime(2026, 10, 6, 0, 6, tzinfo=timezone.utc), "wifi-b", 60).due
+    assert s.tick(90, datetime(2026, 10, 6, 0, 6, tzinfo=tz), "wifi-b", 60).due
+
+
+def test_scheduler_deadline_is_cut_short_by_recovery_boundaries():
+    tz = ZoneInfo("Asia/Shanghai")
+    s = PollScheduler(100, "wifi", datetime(2026, 10, 5, 23, 57, 50, tzinfo=tz))
+    s.reschedule(100, 600)
+    assert s.seconds_until_due(100, datetime(2026, 10, 5, 23, 57, 57, tzinfo=tz)) == 3
+    assert s.seconds_until_due(103, datetime(2026, 10, 5, 23, 58, tzinfo=tz)) == 0
 
 
 def test_config_rejects_invalid_boolean_and_portal_authority(tmp_path):
@@ -154,7 +174,7 @@ def test_legacy_public_selection_is_migrated_to_auto(tmp_path):
     p.write_text('{"active_profile":"public"}', encoding="utf-8")
     cfg = load_config(p)
     assert cfg["active_profile"] == "auto"
-    assert cfg["config_version"] == 3
+    assert cfg["config_version"] == 4
 
 
 def test_saved_v3_manual_selection_is_preserved(tmp_path):
@@ -162,3 +182,20 @@ def test_saved_v3_manual_selection_is_preserved(tmp_path):
     p.write_text('{"config_version":3,"active_profile":"dorm"}', encoding="utf-8")
     cfg = load_config(p)
     assert cfg["active_profile"] == "dorm"
+    assert cfg["edit_profile"] == "public"
+    assert cfg["config_version"] == 4
+
+
+def test_edit_profile_roundtrip_is_persisted_and_validated(tmp_path):
+    p = tmp_path / "config.json"
+    cfg = load_config(p)
+    cfg["edit_profile"] = "dorm"
+    save_config(cfg, p)
+    loaded = load_config(p)
+    assert loaded["edit_profile"] == "dorm"
+    assert loaded["config_version"] == 4
+
+    loaded["edit_profile"] = "invalid"
+    with pytest.raises(ConfigError, match="edit_profile"):
+        save_config(loaded, p)
+    assert load_config(p)["edit_profile"] == "dorm"

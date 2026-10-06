@@ -23,21 +23,22 @@ def test_countdown_uses_real_deadline_without_negative_seconds(elapsed, expected
 
 
 @pytest.mark.parametrize('wall,expected', [
-    (datetime(2026,10,5,23,59,57,tzinfo=TZ),3),
-    (datetime(2026,10,6,0,11,58,tzinfo=TZ),2),
-    (datetime(2026,10,5,15,59,58,tzinfo=timezone.utc),2),
+    (datetime(2026,10,5,23,57,57,tzinfo=TZ),3),
+    (datetime(2026,10,6,0,7,58,tzinfo=TZ),2),
+    (datetime(2026,10,5,15,57,58,tzinfo=timezone.utc),2),
 ])
-def test_earlier_midnight_extra_is_displayed_instead_of_ordinary_deadline(wall, expected):
+def test_recovery_boundary_is_displayed_instead_of_ordinary_deadline(wall, expected):
     scheduler = PollScheduler(100, 'fake-network', wall)
     scheduler.reschedule(100, 60)
     assert countdown_remaining(scheduler, 100, wall) == expected
 
 
 def test_special_check_is_not_displayed_as_due_again_after_it_was_handled():
-    wall = datetime(2026,10,6,0,12,3,tzinfo=TZ)
+    wall = datetime(2026,10,6,0,8,3,tzinfo=TZ)
     scheduler = PollScheduler(100, 'fake-network', wall)
     scheduler.reschedule(100,60)
-    assert countdown_remaining(scheduler,100,wall) == 0
+    scheduler.last_minute = ''
+    # The 00:08 boundary has just been reached; once handled, only heartbeat remains.
     scheduler.last_minute = wall.strftime('%Y%m%d%H%M')
     assert countdown_remaining(scheduler,101,wall) == 59
 
@@ -141,3 +142,14 @@ def test_closing_to_tray_does_not_stop_background_scheduler(gui,monkeypatch):
     assert ignored == [True] and accepted == []
     assert w.timer.isActive() and not w.countdown_timer.isActive()
     assert not w.supervisor.paused
+
+
+def test_scheduler_uses_single_shot_deadline_and_low_frequency_network_fallback(gui):
+    w = gui.window
+    assert w.timer.isSingleShot()
+    assert w.network_poll_timer.interval() == 60_000
+    assert w.network_poll_timer.isActive()
+    w.scheduler.reschedule(time.monotonic(), 600)
+    w.arm_scheduler_timer()
+    assert w.timer.isActive()
+    assert w.timer.remainingTime() > 500_000

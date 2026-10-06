@@ -13,12 +13,13 @@ DORM_PROVIDERS = (("请选择宿舍服务商", "-1"), ("校园网", ""),
                   ("中国移动", "@cmcc"), ("中国联通", "@unicom"), ("中国电信", "@telecom"))
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    "config_version": 3,
+    "config_version": 4,
     "enabled": True,
     "autostart": False,
     "internet_probe_urls": ["https://cp.cloudflare.com/generate_204", "https://www.msftconnecttest.com/connecttest.txt"],
     "credential_mode": "shared",
     "active_profile": "auto",
+    "edit_profile": "public",
     "profiles": {
         "public": {"portal_url": "http://192.168.255.4/", "username": "", "password": "", "provider_suffix": ""},
         "dorm": {"portal_url": "http://172.19.0.1/", "username": "", "password": "", "provider_suffix": "", "provider_confirmed": False},
@@ -50,13 +51,13 @@ def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
     merged = DEFAULT_CONFIG | {k: v for k, v in data.items() if k in DEFAULT_CONFIG}
     # Versions before 0.3.0 stored the previous default scene (public) as if it
     # were an explicit choice. Migrate that legacy value to automatic detection;
-    # an explicit public/dorm selection made and saved in v3 remains unchanged.
+    # an explicit public/dorm selection made and saved in v3+ remains unchanged.
     stored_version = data.get("config_version", 0)
     if not isinstance(stored_version, int) or stored_version < 0:
         raise ConfigError("config_version 必须是非负整数")
     if stored_version < 3 and data.get("active_profile") in {"public", "dorm"}:
         merged["active_profile"] = "auto"
-    merged["config_version"] = 3
+    merged["config_version"] = 4
     probes = merged.get("internet_probe_urls")
     if not isinstance(probes, list) or len(probes) < 2:
         raise ConfigError("公网探测必须配置至少两个 HTTPS 地址")
@@ -96,6 +97,8 @@ def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
             raise ConfigError("场景入口必须是 HTTP(S) 地址")
     if merged.get("active_profile") not in {"auto", "public", "dorm"}:
         raise ConfigError("active_profile 只支持 auto/public/dorm")
+    if merged.get("edit_profile") not in {"public", "dorm"}:
+        raise ConfigError("edit_profile 只支持 public/dorm")
     return merged
 
 

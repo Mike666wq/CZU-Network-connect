@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import math
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import Qt, QPointF, QRectF, QTimer
@@ -65,21 +65,8 @@ QMenu { background: #202a2f; color: #edf2f0; border: 1px solid #445159; padding:
 
 
 def countdown_remaining(scheduler, now_monotonic: float, now_wall: datetime) -> int:
-    """Read-only view of the scheduler's deadline and its two daily extra checks.
-
-    This never calls tick/reschedule or starts a check. At zero the existing
-    five-second scheduler timer (not the display timer) still executes the work.
-    """
-    remaining = max(0.0, scheduler.deadline - now_monotonic)
-    timezone = ZoneInfo("Asia/Shanghai")
-    wall = now_wall.replace(tzinfo=timezone) if now_wall.tzinfo is None else now_wall.astimezone(timezone)
-    key = wall.strftime("%Y%m%d%H%M")
-    if (wall.hour, wall.minute) in {(0, 0), (0, 12)} and scheduler.last_minute != key:
-        return 0
-    midnight = wall.replace(hour=0, minute=0, second=0, microsecond=0)
-    extras = [midnight + timedelta(days=day, minutes=minute) for day in (0, 1) for minute in (0, 12)]
-    upcoming = min((moment - wall).total_seconds() for moment in extras if moment > wall)
-    return math.ceil(min(remaining, upcoming))
+    """Read-only view of the actual heartbeat/recovery deadline."""
+    return scheduler.seconds_until_due(now_monotonic, now_wall)
 
 
 def label(text, object_name="muted", wrap=False):
@@ -220,8 +207,10 @@ class ProcessTrack(QWidget):
             done = self.states[i] == "done" and self.states[i+1] in {"done", "active"}
             p.setPen(QPen(QColor("#598a78" if done else "#334149"), 1.5))
             p.drawLine(points[i] + QPointF(15, 0), points[i+1] - QPointF(15, 0))
-        colors = {"pending": "#607079", "done": "#8ae6bf", "active": "#8ae6bf", "skipped": "#83939b", "warning": "#efc27d"}
-        captions = {"pending": "待执行", "done": "已完成", "active": "进行中", "skipped": "无需执行", "warning": "待处理"}
+        colors = {"pending": "#607079", "done": "#8ae6bf", "active": "#8ae6bf",
+                  "skipped": "#83939b", "neutral": "#83939b", "warning": "#efc27d"}
+        captions = {"pending": "待执行", "done": "已完成", "active": "进行中",
+                    "skipped": "无需执行", "neutral": "未确认", "warning": "待处理"}
         for i, state in enumerate(self.states):
             color = QColor(colors[state]); x = points[i].x()
             p.setPen(QPen(color, 1.2)); p.setBrush(QColor("#233d33" if state == "done" else "#1b2429"))
@@ -231,7 +220,8 @@ class ProcessTrack(QWidget):
                 p.setPen(QPen(color, 1.8)); p.drawLine(QPointF(x-5, y), QPointF(x-1, y+4)); p.drawLine(QPointF(x-1, y+4), QPointF(x+6, y-4))
             else:
                 p.setFont(QFont(ui_font(), 11))
-                p.drawText(QRectF(x-12, y-12, 24, 24), Qt.AlignmentFlag.AlignCenter, "—" if state == "skipped" else str(i+1))
+                p.drawText(QRectF(x-12, y-12, 24, 24), Qt.AlignmentFlag.AlignCenter,
+                           "—" if state in {"skipped", "neutral"} else str(i+1))
             p.setPen(QColor("#e1eaeb" if state in {"done", "active"} else "#9babb2"))
             p.setFont(QFont(ui_font(), 12))
             p.drawText(QRectF(step*i, 45, step, 20), Qt.AlignmentFlag.AlignCenter, self.titles[i])
@@ -283,7 +273,7 @@ class Dashboard(QWidget):
         window.countdown_value.setAccessibleName("下一次网络检查剩余时间")
         countdown_row.addWidget(window.countdown_value)
         countdown_row.addStretch()
-        window.schedule_label = label("00:00、00:12 额外检查\n北京时间", "schedule", True)
+        window.schedule_label = label("23:58–00:15 午夜恢复窗口\n北京时间", "schedule", True)
         window.schedule_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         countdown_row.addWidget(window.schedule_label)
         layout.addLayout(countdown_row)
@@ -312,7 +302,7 @@ class Dashboard(QWidget):
         self.orb.set_mode("working")
         self.flow_note.setText("正在处理本轮连接")
         self.add_event({"startup": "开始启动检查", "heartbeat": "开始周期检查", "network": "网络发生变化，重新检查",
-                        "midnight": "午夜检查开始", "midnight_extra": "00:12 额外检查开始", "retry": "开始手动重试",
+                        "midnight": "午夜恢复窗口开始", "midnight_extra": "午夜恢复进入快速检查阶段", "retry": "开始手动重试",
                         "wake": "设备唤醒，重新检查"}.get(reason, "开始网络检查"))
 
     def progress(self, message):
@@ -344,8 +334,12 @@ class Dashboard(QWidget):
         if state == State.AUTHENTICATED and submitted:
             self.states = ["done"] * 5
         elif success:
-            # Online checks and previously online sessions did not submit a login.
-            self.states = ["done", "done" if "未识别" not in message and "不在校园网" not in message else "warning", "skipped", "skipped", "done"]
+            # Internet reachability is the terminal success criterion. If the
+            # campus portal cannot be identified while Internet is already
+            # reachable, scene identification is informational rather than an
+            # outstanding user action.
+            scene_state = "neutral" if "未识别" in message or "不在校园网" in message else "done"
+            self.states = ["done", scene_state, "skipped", "skipped", "done"]
         elif state == State.NEEDS_CONFIG:
             self.states[self.stage] = "warning"
             if "服务商" in message or "账号和密码" in message:

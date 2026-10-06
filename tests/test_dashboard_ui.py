@@ -70,11 +70,12 @@ def test_session_history_is_bounded_and_does_not_read_credentials(gui):
     assert 'never-log' not in w.dashboard.events.toPlainText()
 
 
-def test_unknown_scene_does_not_claim_identification_complete(gui):
+def test_unknown_scene_is_neutral_when_internet_is_already_available(gui):
     dashboard = gui.window.dashboard
     dashboard.finish(State.ONLINE, '互联网可用；公共网和宿舍网入口均未识别，可能不在校园网')
-    assert dashboard.track.states[1] == 'warning'
-    assert dashboard.track.states[3] == 'skipped'
+    assert dashboard.track.states == ['done', 'neutral', 'skipped', 'skipped', 'done']
+    assert dashboard.orb.mode == 'success'
+    assert dashboard.flow_note.text() == '本轮已完成'
 
 
 def test_repeat_scene_result_does_not_duplicate_log_after_success(gui):

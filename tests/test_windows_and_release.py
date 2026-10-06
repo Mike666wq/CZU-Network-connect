@@ -176,3 +176,58 @@ def test_build_info_uses_same_platform_names_as_smoke_test(tmp_path,monkeypatch)
     output=tmp_path/'build-info.json'
     module.write(output,True)
     assert json.loads(output.read_text())['platform']=='macOS'
+
+
+def test_mac_prune_removes_unused_qt_chains_but_preserves_required_runtime(tmp_path):
+    spec=importlib.util.spec_from_file_location('prune_macos_bundle',Path('tools/prune_macos_bundle.py'))
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    app=tmp_path/'Campus.app'
+    required=[
+        'Contents/Frameworks/PySide6/Qt/lib/QtCore.framework',
+        'Contents/Frameworks/PySide6/Qt/lib/QtGui.framework',
+        'Contents/Frameworks/PySide6/Qt/lib/QtWidgets.framework',
+        'Contents/Frameworks/PySide6/Qt/lib/QtNetwork.framework',
+        'Contents/Frameworks/PySide6/Qt/plugins/platforms/libqcocoa.dylib',
+        'Contents/Frameworks/PySide6/Qt/plugins/networkinformation/libqapplenetworkinformation.dylib',
+        'Contents/Helpers/campus-http-worker.app',
+    ]
+    for relative in required:
+        path=app/relative
+        if path.suffix:
+            path.parent.mkdir(parents=True,exist_ok=True);path.touch()
+        else:path.mkdir(parents=True,exist_ok=True)
+    for name in module.UNUSED_PLUGIN_DIRS:
+        path=app/'Contents/Frameworks/PySide6/Qt/plugins'/name
+        path.mkdir(parents=True,exist_ok=True);(path/'unused.dylib').touch()
+    for name in module.UNUSED_QT_FRAMEWORKS:
+        (app/'Contents/Frameworks/PySide6/Qt/lib'/f'{name}.framework').mkdir(parents=True,exist_ok=True)
+
+    result=module.prune(app)
+    assert result['plugin_dirs']==len(module.UNUSED_PLUGIN_DIRS)
+    assert result['qt_frameworks']==len(module.UNUSED_QT_FRAMEWORKS)
+    assert all((app/relative).exists() for relative in required)
+    assert not any((app/'Contents/Frameworks/PySide6/Qt/plugins'/name).exists()
+                   for name in module.UNUSED_PLUGIN_DIRS)
+
+
+def test_mac_build_runs_qt_pruning_before_final_codesign():
+    build=Path('build.sh').read_text()
+    prune=build.index("tools/prune_macos_bundle.py 'dist/校园网助手.app'")
+    sign=build.index("codesign --force --deep --sign - 'dist/校园网助手.app'")
+    assert prune < sign
+
+
+def test_release_notes_match_scheduler_2_and_current_flow_semantics():
+    notes=tool_module().release_notes()
+    assert '10 分钟心跳' in notes
+    assert '30/60/120/300 秒退避' in notes
+    assert '23:58–00:15' in notes
+    assert '未确认 / 无需执行 / 待处理' in notes
+
+
+def test_current_source_package_includes_macos_pruning_tool(tmp_path):
+    tool=tool_module()
+    target=tmp_path/'source.zip'
+    tool.source_zip(target)
+    with ZipFile(target) as archive:
+        assert 'Networkconnect/tools/prune_macos_bundle.py' in archive.namelist()

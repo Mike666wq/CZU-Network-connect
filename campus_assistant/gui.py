@@ -77,12 +77,15 @@ class Window(QMainWindow):
         self.build_ui()
         self.apply_config_to_ui()
         self.timer = QTimer(self)
+        self.timer.setSingleShot(True)
         self.timer.timeout.connect(self.timer_tick)
-        self.timer.start(5000)
-        self.deadline = time.monotonic()
-        self.last_minute_key = ""
+        self.network_poll_timer = QTimer(self)
+        self.network_poll_timer.setInterval(60_000)
+        self.network_poll_timer.timeout.connect(self.poll_network_signature)
+        self.network_poll_timer.start()
         self.network_signature = self.get_network_signature()
-        self.scheduler = PollScheduler(time.monotonic(), self.network_signature)
+        self.scheduler = PollScheduler(time.monotonic(), self.network_signature,
+                                       datetime.now(ZoneInfo("Asia/Shanghai")))
         self.countdown_timer = QTimer(self)
         self.countdown_timer.setInterval(1000)
         self.countdown_timer.timeout.connect(self.refresh_countdown)
@@ -138,9 +141,9 @@ class Window(QMainWindow):
             if remaining == 0:
                 detail = "已到检查时间，等待后台调度"
             elif self.supervisor.auth_blocked:
-                detail = "仍会检查网络 · 认证待处理\n北京时间 00:00、00:12 额外检查"
+                detail = "仍会检查网络 · 认证待处理\n23:58–00:15 午夜恢复窗口"
             else:
-                detail = "00:00、00:12 额外检查\n北京时间 · 每秒更新"
+                detail = "稳定在线约 10 分钟检查一次\n23:58–00:15 午夜恢复窗口"
         self.countdown_value.setText(value)
         self.schedule_label.setText(detail)
 
@@ -301,29 +304,65 @@ class Window(QMainWindow):
             self.supervisor.set_paused(True); self.set_status(State.NEEDS_CONFIG, str(exc))
             QMessageBox.warning(self, "配置文件无效", f"自动认证已暂停，请修正配置文件后再次重载。\n{exc}")
 
-    def timer_tick(self):
+    def current_network_signature(self):
         signature = self.get_network_signature()
         if self.network_info is not None:
             signature += f"|reachability:{self.network_info.reachability()}"
+        return signature
+
+    def arm_scheduler_timer(self):
+        """Sleep until the actual heartbeat/recovery deadline instead of polling every five seconds."""
+        self.timer.stop()
+        if (self.running or self.quit_after_check or self.manual_paused or self.invalid_config or
+                not self.config.get("enabled", True) or self.supervisor.paused):
+            return
+        seconds = self.scheduler.seconds_until_due(
+            time.monotonic(), datetime.now(ZoneInfo("Asia/Shanghai")))
+        self.timer.start(max(1, seconds * 1000))
+
+    def timer_tick(self):
+        signature = self.current_network_signature()
         now = datetime.now(ZoneInfo("Asia/Shanghai"))
-        tick = self.scheduler.tick(time.monotonic(), now, signature, max(30, self.supervisor.outcome.next_seconds))
+        tick = self.scheduler.tick(time.monotonic(), now, signature,
+                                   max(1, self.supervisor.outcome.next_seconds))
         self.network_signature = signature
-        if tick.network_changed: self.supervisor.network_changed(signature)
-        if tick.due:
-            self.next_reason = ("network" if tick.network_changed else "wake" if tick.woke else
-                                "midnight" if tick.special_time and now.minute == 0 else
-                                "midnight_extra" if tick.special_time else "heartbeat")
-            if self.running and (tick.network_changed or tick.special_time or tick.woke): self.pending = True
-            elif not self.running: self.start_check()
+        if tick.network_changed:
+            self.supervisor.network_changed(signature)
+        if not tick.due:
+            self.arm_scheduler_timer()
+            return
+        self.next_reason = ("network" if tick.network_changed else "wake" if tick.woke else
+                            "midnight" if tick.special_time and now.hour == 23 else
+                            "midnight_extra" if tick.special_time else "heartbeat")
+        if self.running:
+            if tick.network_changed or tick.special_time or tick.woke:
+                self.pending = True
+        else:
+            self.start_check()
+
+    def poll_network_signature(self):
+        """Low-frequency fallback for platforms that miss a native network-change event."""
+        signature = self.current_network_signature()
+        if signature != self.network_signature:
+            self.handle_network_change(signature)
+            return
+        if self.scheduler.seconds_until_due(
+                time.monotonic(), datetime.now(ZoneInfo("Asia/Shanghai"))) == 0:
+            self.timer_tick()
+
+    def handle_network_change(self, signature):
+        if signature == self.network_signature:
+            return
+        self.network_signature = signature
+        self.supervisor.network_changed(signature)
+        self.scheduler.reschedule(time.monotonic(), max(1, self.supervisor.outcome.next_seconds))
+        self.pending = self.running
+        self.next_reason = "network"
+        if not self.running and not (self.manual_paused or self.invalid_config or self.supervisor.paused):
+            self.start_check()
 
     def network_event(self):
-        signature = self.get_network_signature() + f"|reachability:{self.network_info.reachability()}"
-        if signature != self.network_signature:
-            self.network_signature = signature; self.supervisor.network_changed(signature); self.pending = True
-            self.next_reason = "network"
-            self.scheduler.tick(time.monotonic(), datetime.now(ZoneInfo("Asia/Shanghai")), signature,
-                                max(30, self.supervisor.outcome.next_seconds))
-            if not self.running: self.start_check()
+        self.handle_network_change(self.current_network_signature())
 
     @staticmethod
     def get_network_signature():
@@ -338,6 +377,7 @@ class Window(QMainWindow):
         if self.running:
             self.pending = True; return
         if not self.config.get("enabled", True): return
+        self.timer.stop()
         from PySide6.QtCore import QThread
         force = self.pending_force; self.pending_force = False; self.pending = False
         self.running_reason = self.next_reason
@@ -411,7 +451,8 @@ class Window(QMainWindow):
                          auth_attempted=getattr(self.service, "auth_submitted", False), reason=self.running_reason)
             if outcome.notify: self.tray.showMessage("校园网认证", outcome.message)
             self.supervisor.outcome = outcome
-            self.scheduler.reschedule(time.monotonic(), max(30, min(outcome.next_seconds, 300)))
+            self.scheduler.reschedule(time.monotonic(), max(1, outcome.next_seconds))
+            self.arm_scheduler_timer()
             self.refresh_countdown()
         else:
             self.pending = True
@@ -432,10 +473,15 @@ class Window(QMainWindow):
     def retry(self):
         self.next_reason = "retry"
         if self.running: self.pending = True; self.pending_force = True; return
-        self.supervisor.auth_blocked = False; self.supervisor.unknown_count = 0; self.start_check()
+        self.supervisor.auth_blocked = False
+        self.supervisor.unknown_count = 0
+        self.supervisor.offline_count = 0
+        self.start_check()
     def toggle_pause(self):
         self.manual_paused = not self.manual_paused
         self.supervisor.set_paused(self.manual_paused or self.invalid_config)
+        if self.supervisor.paused:
+            self.timer.stop()
         self.set_status(State.PAUSED if self.supervisor.paused else State.WAITING,
                         "已暂停" if self.supervisor.paused else "已恢复，即将重新检查")
         if not self.supervisor.paused:
@@ -486,7 +532,7 @@ class Window(QMainWindow):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 executable = sys.executable
                 app_path = Path(executable).resolve().parents[2] if getattr(sys, "frozen", False) else None
-                args = ["open", "-a", str(app_path)] if app_path else [executable, str(Path(__file__).resolve().parent / "main.py")]
+                args = ["open", "-a", str(app_path)] if app_path else [executable, str(Path(__file__).resolve().parents[1] / "main.py")]
                 path.write_bytes(plistlib.dumps({"Label": "com.codex.campus-network-assistant", "ProgramArguments": args,
                     "RunAtLoad": True, "KeepAlive": False}))
             else:

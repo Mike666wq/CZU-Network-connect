@@ -63,3 +63,33 @@ footprint活跃快照原版106.037 MiB、优化版99.114 MiB；这两次快照�
 ## 回归验证
 
 最终123项测试及2项子测试通过。覆盖请求总超时、取消后进程回收、大响应体IPC、凭据不进入argv、轻量入口不加载Qt，以及原有识别、服务商、午夜调度和界面行为。优化版Mac应用已重新打包并通过本地代码签名完整性检查。
+
+
+## v0.3.6：Scheduler 2.0 与 Qt 裁剪补充测量
+
+测量环境仍为同一台 Apple M1 / 8 GiB / macOS 26.6.2 arm64。此轮使用已经通过代码签名验证的原生打包应用，并保留独立 campus-http-worker；网络流量仍只访问 127.0.0.1 回环测试服务，不读取个人配置，不提交校园认证。
+
+### 调度与后台行为
+
+- 稳定联网 heartbeat 从 60 秒改为 600 秒。
+- 普通断网使用 30 / 60 / 120 / 300 秒退避。
+- 23:58–00:08 使用 60 秒恢复节奏，00:08–00:15 使用 30 秒节奏。
+- 原先每 5 秒调度轮询改为 single-shot deadline timer；系统网络变化事件可立即触发，60 秒接口签名轮询仅作为漏报兜底。
+
+### 打包裁剪
+
+PyInstaller 默认 Qt 插件会间接带入 QML、Quick、Pdf、VirtualKeyboard、Svg、OpenGL 等当前 Widgets UI 不使用的功能链。构建流程现在在最终签名前显式移除这些插件和依赖框架，同时保留 QtCore、QtGui、QtWidgets、QtNetwork、Cocoa platform plugin、Apple network-information plugin，以及独立 HTTP helper。裁剪后必须重新 codesign，并通过 frozen packaged smoke test。
+
+| 指标 | v0.3.2 优化版 | v0.3.6 本轮长测 | 说明 |
+|---|---:|---:|---|
+| Mac .app 展开体积 | 约 118 MiB（本轮重建基线） | **约 94 MiB** | **约 -20.3%** |
+| Mac ZIP | 约 44 MiB（本轮重建基线） | **约 34 MiB** | **约 -22.7%** |
+| 后台空闲 RSS 中位数 | 169.42 MiB | **149.14 MiB** | 本轮约低 12%，但 RSS 受系统缓存影响 |
+| 活跃检查 RSS 峰值 | 223.95 MiB | **210.86 MiB** | 本轮约低 5.8% |
+| 连续 30 次检查 RSS 中位数 / 峰值 | — | **162.30 / 162.84 MiB** | 结束时无遗留 HTTP 子进程 |
+| 后台空闲 footprint 快照 | 74.284 MiB | **104.613 MiB** | 未复现旧版较低快照，不宣称 footprint 改善 |
+| 后台空闲平均 CPU | 0.228% | **1.725%** | 14 秒采样窗口噪声较大，不用于证明稳态 CPU 变差或变好 |
+
+长测运行约 104.47 秒，共完成 36 次回环请求，其中末段 30 次为连续检查；auth_requests=0，结束时没有遗留 HTTP 子进程。Qt 裁剪的确定收益是发布体积；运行时内存数据有改善迹象，但 footprint 与短窗口 CPU 在不同运行间波动明显，因此不把它们宣传为稳定百分比收益。Scheduler 2.0 的主要运行时收益来自减少真实日常场景中的唤醒和公网请求次数，而这个 profiler 会主动触发检查，不适合用来量化“10 分钟心跳”带来的长期 CPU 节省。
+
+最终验收：153 项测试和 2 项子测试通过；正式裁剪后的 macOS frozen smoke test通过，确认使用 campus-http-worker 完成回环请求；codesign --verify --deep --strict 通过。正式构建包未包含被裁剪的 10 组 Qt framework 链。

@@ -4,6 +4,8 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from copy import deepcopy
+from pathlib import Path
+import plistlib
 from types import SimpleNamespace
 
 import pytest
@@ -398,3 +400,35 @@ def test_real_worker_scene_signal_switches_ui_before_missing_provider_result(gui
     assert window.service.profile_name == 'dorm'
     assert window.dorm_provider.currentData() == '@cmcc'
     assert window.service.auth_submitted
+
+
+def test_macos_source_autostart_points_to_project_root_main(monkeypatch, tmp_path):
+    project = tmp_path / "Networkconnect"
+    package = project / "campus_assistant"
+    package.mkdir(parents=True)
+    root_main = project / "main.py"
+    root_main.write_text("# entry\n", encoding="utf-8")
+
+    monkeypatch.setattr(main.sys, "platform", "darwin")
+    monkeypatch.setattr(main.sys, "executable", "/usr/bin/python3")
+    monkeypatch.delattr(main.sys, "frozen", raising=False)
+    monkeypatch.setattr(main, "__file__", str(package / "gui.py"))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+    main.Window.apply_autostart(True)
+    plist_path = tmp_path / "Library/LaunchAgents/com.codex.campus-network-assistant.plist"
+    data = plistlib.loads(plist_path.read_bytes())
+    assert data["ProgramArguments"] == ["/usr/bin/python3", str(root_main)]
+    assert Path(data["ProgramArguments"][1]).is_file()
+
+    main.Window.apply_autostart(False)
+    assert not plist_path.exists()
+
+
+def test_network_change_while_paused_does_not_start_worker(gui):
+    w = gui.window
+    w.manual_paused = True
+    w.supervisor.set_paused(True)
+    w.handle_network_change("changed-network")
+    assert gui.starts == []
+    assert w.next_reason == "network"

@@ -56,7 +56,11 @@ def run_smoke(output: Path):
     gui.CampusService=SafeService
     app=QApplication.instance() or QApplication(['safe-packaged-smoke'])
     app.setQuitOnLastWindowClosed(False)
-    window=gui.Window();window.show()
+    # CI runners may emit a reachabilityChanged event immediately after Qt starts,
+    # which is correct for production but can cancel this deterministic loopback-only
+    # probe before it sends its first request. Native network events are therefore
+    # disabled only for this isolated smoke test.
+    window=gui.Window(native_network_events=False);window.show()
     result={'ok':False,'version':__version__,'platform':platform_name(),
             'frozen':bool(getattr(sys,'frozen',False)),'scope':'offscreen UI and loopback-only HTTP, no personal config',
             'auth_requests':0}

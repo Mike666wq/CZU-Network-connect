@@ -102,7 +102,7 @@ def gui(monkeypatch, tmp_path):
                         SimpleNamespace(QNetworkInformation=FakeNetworkInformation))
     monkeypatch.setattr(main.Window, "start_check", lambda self: start_calls.append(self))
 
-    window = main.Window()
+    window = main.Window(native_network_events=False)
     window.timer.stop()
     if not hasattr(window, "network_info"):
         window.network_info = None

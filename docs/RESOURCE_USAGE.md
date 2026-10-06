@@ -65,7 +65,7 @@ footprint活跃快照原版106.037 MiB、优化版99.114 MiB；这两次快照�
 最终123项测试及2项子测试通过。覆盖请求总超时、取消后进程回收、大响应体IPC、凭据不进入argv、轻量入口不加载Qt，以及原有识别、服务商、午夜调度和界面行为。优化版Mac应用已重新打包并通过本地代码签名完整性检查。
 
 
-## v0.3.6：Scheduler 2.0 与 Qt 裁剪补充测量
+## v0.3.7：Scheduler 2.0 与 Qt 裁剪补充测量
 
 测量环境仍为同一台 Apple M1 / 8 GiB / macOS 26.6.2 arm64。此轮使用已经通过代码签名验证的原生打包应用，并保留独立 campus-http-worker；网络流量仍只访问 127.0.0.1 回环测试服务，不读取个人配置，不提交校园认证。
 
@@ -80,7 +80,7 @@ footprint活跃快照原版106.037 MiB、优化版99.114 MiB；这两次快照�
 
 PyInstaller 默认 Qt 插件会间接带入 QML、Quick、Pdf、VirtualKeyboard、Svg、OpenGL 等当前 Widgets UI 不使用的功能链。构建流程现在在最终签名前显式移除这些插件和依赖框架，同时保留 QtCore、QtGui、QtWidgets、QtNetwork、Cocoa platform plugin、Apple network-information plugin，以及独立 HTTP helper。裁剪后必须重新 codesign，并通过 frozen packaged smoke test。
 
-| 指标 | v0.3.2 优化版 | v0.3.6 本轮长测 | 说明 |
+| 指标 | v0.3.2 优化版 | v0.3.7 本轮长测 | 说明 |
 |---|---:|---:|---|
 | Mac .app 展开体积 | 约 118 MiB（本轮重建基线） | **约 94 MiB** | **约 -20.3%** |
 | Mac ZIP | 约 44 MiB（本轮重建基线） | **约 34 MiB** | **约 -22.7%** |

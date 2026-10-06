@@ -4,7 +4,7 @@
 
 面向本校公共区域和宿舍网络的个人桌面工具。识别学校已有的 Dr.COM 认证门户，在需要认证时按页面实际协议提交账号密码；不是绕过认证，也不是通用的跨学校破解工具。
 
-当前版本：**v0.3.6**。软件包由 GitHub Actions 的两套原生环境构建：Mac **M 系列（Apple Silicon）**和 Windows **x64**，不提供 Intel Mac 版或安卓 APK。
+当前版本：**v0.3.7**。软件包由 GitHub Actions 的两套原生环境构建：Mac **M 系列（Apple Silicon）**和 Windows **x64**，不提供 Intel Mac 版或安卓 APK。
 
 [下载与版本发布](https://github.com/Mike666wq/CZU-Network-connect/releases) · [构建状态](https://github.com/Mike666wq/CZU-Network-connect/actions) · [资源占用报告](docs/RESOURCE_USAGE.md) · [发布指南](docs/RELEASING.md)
 

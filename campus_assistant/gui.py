@@ -49,7 +49,7 @@ class Worker(QObject):
 
 
 class Window(QMainWindow):
-    def __init__(self):
+    def __init__(self, native_network_events: bool = True):
         super().__init__()
         self.setWindowTitle("校园网助手 · v" + __version__ + " · " + platform_name())
         self.resize(520, 470)
@@ -109,13 +109,14 @@ class Window(QMainWindow):
         self.hide_on_close = True
         self.pending = False; self.pending_force = False
         self.network_info = None
-        try:
-            from PySide6.QtNetwork import QNetworkInformation
-            if QNetworkInformation.loadDefaultBackend():
-                self.network_info = QNetworkInformation.instance()
-                self.network_info.reachabilityChanged.connect(lambda *_: self.network_event())
-        except (ImportError, AttributeError):
-            self.network_info = None
+        if native_network_events:
+            try:
+                from PySide6.QtNetwork import QNetworkInformation
+                if QNetworkInformation.loadDefaultBackend():
+                    self.network_info = QNetworkInformation.instance()
+                    self.network_info.reachabilityChanged.connect(lambda *_: self.network_event())
+            except (ImportError, AttributeError):
+                self.network_info = None
         self.start_check()
 
     @Slot()

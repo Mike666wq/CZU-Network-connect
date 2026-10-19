@@ -114,7 +114,7 @@ def test_release_verifies_pe_and_rejects_unvalidated_windows_build(tmp_path):
 
 
 def test_release_includes_setup_exe_when_present(tmp_path):
-    """A compiled Inno Setup installer is verified as x64 PE and added to the
+    """A compiled Inno Setup installer is verified as a PE and added to the
     release artifacts and checksum manifest alongside the portable zip."""
     tool=tool_module()
     app=tmp_path/'app';app.mkdir()
@@ -126,7 +126,9 @@ def test_release_includes_setup_exe_when_present(tmp_path):
     metadata=tmp_path/'metadata.json'
     metadata.write_text(json.dumps({'tests_passed':True,'version':__version__,'platform':'Windows'}))
     setup=tmp_path/f'campus-network-assistant-Setup-v{__version__}.exe'
-    pe(setup)
+    # Inno's Setup.exe loader is 32-bit even for 64-bit installs; the release
+    # must accept any valid PE, not just x64.
+    pe(setup, architecture=0x14c)
 
     artifacts=tool.windows_assets(app,tmp_path/'release',smoke,metadata,setup)
     names=[p.name for p in artifacts]

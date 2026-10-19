@@ -77,6 +77,19 @@ def verify_x64_pe(path):
         if struct.unpack('<H',handle.read(2))[0]!=0x8664:raise ValueError('Windows release must be x64')
 
 
+def verify_pe(path):
+    """Architecture-agnostic PE check for the Inno Setup bootstrapper.
+
+    Inno's Setup.exe loader is always 32-bit even when it installs a 64-bit
+    application, so the x64 check above would wrongly reject a valid installer.
+    """
+    with path.open('rb') as handle:
+        if handle.read(2)!=b'MZ':raise ValueError(f'{path.name} is not a Windows PE binary')
+        handle.seek(0x3c);offset=struct.unpack('<I',handle.read(4))[0]
+        handle.seek(offset)
+        if handle.read(4)!=b'PE\0\0':raise ValueError('Missing PE signature')
+
+
 def release_notes():
     return f'''# 校园网助手 v{__version__} · Mac M系列 / Windows x64
 
@@ -130,7 +143,7 @@ def windows_assets(app_dir: Path, output: Path, smoke: Path, build_metadata: Pat
     if setup_exe is not None:
         setup_exe=Path(setup_exe)
         if not setup_exe.is_file():raise ValueError(f'Missing installer: {setup_exe}')
-        verify_x64_pe(setup_exe)
+        verify_pe(setup_exe)
         # The installer is copied verbatim into the release set; its filename
         # already carries the version and "Setup" marker from installer.iss.
         setup_target=output/setup_exe.name

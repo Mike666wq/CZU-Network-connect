@@ -26,6 +26,7 @@
 | 文件名 | 用途 |
 |---|---|
 | `campus-network-assistant-v版本-macos-arm64.zip` | **Mac M 系列版**，内含 `.app` |
+| `campus-network-assistant-Setup-v版本.exe` | **Windows 安装程序（推荐）**，装到 Program Files，可选开机启动，自带卸载 |
 | `campus-network-assistant-v版本-windows-x64.zip` | **Windows 便携版**，内含 `.exe` 和完整依赖目录 |
 | `campus-network-assistant-v版本-source.zip` | 开发源码，不是可执行应用 |
 | `SHA256SUMS-all.txt` | 两端应用包、源码包及构建说明的校验值 |
@@ -37,7 +38,9 @@
 
 ### Windows
 
-将 ZIP **完整解压**到固定目录，再运行“校园网助手.exe”。必须保留 `_internal` 和 `http-worker` 目录，不能只复制 `.exe`。最终使用者无需安装 Python。
+**推荐**：下载 `campus-network-assistant-Setup-v版本.exe` 安装程序，双击安装到 Program Files。安装时可勾选“登录 Windows 后自动启动”，卸载走控制面板标准流程；升级时安装程序会自动退出旧实例并覆盖文件，无需手动清理。安装程序内装的仍然是完整目录结构，运行性能与便携版一致。
+
+**无管理员权限时**：将 ZIP **完整解压**到固定目录，再运行“校园网助手.exe”。必须保留 `_internal` 和 `http-worker` 目录，不能只复制 `.exe`。最终使用者无需安装 Python。
 
 Windows 包**未使用 Authenticode 签名证书**，可能提示未知发布者。请确认来源并核对校验值，不关闭系统防护。升级前在旧程序中点击“退出”，再更换目录；启用开机启动后，不要随意移动应用目录。
 

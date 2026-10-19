@@ -29,9 +29,17 @@ def prepare(artifacts, output, version):
     artifacts=Path(artifacts).resolve();output=Path(output).resolve()
     if output==artifacts or output.is_relative_to(artifacts):
         raise ValueError('Output must be outside downloaded artifacts to avoid duplicate searches')
+    setup_name=f'campus-network-assistant-Setup-v{version}.exe'
     expected=[f'campus-network-assistant-v{version}-windows-x64.zip',
               f'campus-network-assistant-v{version}-source.zip','build-info.json',
-              f'campus-network-assistant-v{version}-macos-arm64.zip','macos-build-info.json']
+              f'campus-network-assistant-v{version}-macos-arm64.zip','macos-build-info.json',
+              setup_name]
+    # The installer is optional for backwards compatibility with builds made
+    # before installer.iss existed; it becomes mandatory once present.
+    windows_manifest=locate(artifacts,'SHA256SUMS.txt')
+    setup_included=setup_name in windows_manifest.read_text(encoding='utf-8-sig')
+    if not setup_included:
+        expected.remove(setup_name)
     verified={}
     for manifest_name in ('SHA256SUMS.txt','SHA256SUMS-macos.txt'):
         manifest=locate(artifacts,manifest_name)

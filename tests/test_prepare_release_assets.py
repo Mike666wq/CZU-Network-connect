@@ -38,6 +38,29 @@ def test_nested_mac_artifact_is_verified_and_flattened(tmp_path):
     assert (result/'release-notes.md').is_file()
 
 
+def test_setup_exe_is_verified_and_flattened_when_present(tmp_path):
+    root=tmp_path/'artifacts';windows,mac=assets(root)
+    setup=windows/'campus-network-assistant-Setup-v0.3.4.exe'
+    setup.write_bytes(b'installer fixture')
+    manifest=windows/'SHA256SUMS.txt'
+    manifest.write_text(manifest.read_text() +
+                        hashlib.sha256(setup.read_bytes()).hexdigest()+'  '+setup.name+'\n')
+    result=tool().prepare(root,tmp_path/'prepared','0.3.4')
+    assert (result/'campus-network-assistant-Setup-v0.3.4.exe').is_file()
+    assert len((result/'SHA256SUMS-all.txt').read_text().splitlines())==6
+
+
+def test_setup_exe_checksum_mismatch_is_rejected(tmp_path):
+    root=tmp_path/'artifacts';windows,_=assets(root)
+    setup=windows/'campus-network-assistant-Setup-v0.3.4.exe'
+    setup.write_bytes(b'installer fixture')
+    manifest=windows/'SHA256SUMS.txt'
+    manifest.write_text(manifest.read_text() +
+                        hashlib.sha256(b'tampered').hexdigest()+'  '+setup.name+'\n')
+    with pytest.raises(ValueError,match='Checksum mismatch'):
+        tool().prepare(root,tmp_path/'prepared','0.3.4')
+
+
 def test_tampered_artifact_is_not_rehashed_as_valid(tmp_path):
     root=tmp_path/'artifacts';_,mac=assets(root)
     (mac/'campus-network-assistant-v0.3.4-macos-arm64.zip').write_bytes(b'changed')

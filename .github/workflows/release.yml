@@ -37,6 +37,14 @@ jobs:
         with:
           python-version: '3.12'
           architecture: x64
+      - name: Install Inno Setup compiler
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          $Iscc = Get-ChildItem 'C:\Program Files*\Inno Setup*\ISCC.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $Iscc) { throw 'Inno Setup installation failed' }
+          # Expose iscc to build.ps1 via PATH for this and later steps.
+          Add-Content $env:GITHUB_PATH ($Iscc.Directory.FullName)
       - name: Read version and verify tag
         id: version
         shell: pwsh
@@ -176,6 +184,10 @@ jobs:
                   "campus-network-assistant-v${VERSION}-macos-arm64.zip"
                   "campus-network-assistant-v${VERSION}-source.zip"
                   "SHA256SUMS-all.txt" "build-info.json" "macos-build-info.json")
+          # Attach the installer only if the Windows job produced one.
+          if [ -f "campus-network-assistant-Setup-v${VERSION}.exe" ]; then
+            assets+=("campus-network-assistant-Setup-v${VERSION}.exe")
+          fi
           if draft=$(gh release view "$TAG" --json isDraft --jq '.isDraft' 2>/dev/null); then
             if [ "$draft" != "true" ]; then
               echo 'Refusing to overwrite a published Release. Create a new version tag.' >&2

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shutil
 from pathlib import Path
 import struct
 import subprocess
@@ -93,7 +94,7 @@ def release_notes():
 
 Mac：下载macOS-arm64 ZIP，解压后将“校园网助手.app”移到Applications。仅支持M系列芯片，不提供Intel版。此版为本地ad-hoc签名，未做Apple公证；如系统提示来源问题，请在确认来源和校验值后按系统安全设置处理，不关闭全局安全防护。
 
-下载Windows便携ZIP并完整解压，运行“校园网助手.exe”。请保留`http-worker`和`_internal`目录，不要只复制exe。无需安装Python。升级前先退出旧应用；用户配置在用户目录的“校园网助手”文件夹，默认不随应用包分发。
+Windows 推荐下载 `campus-network-assistant-Setup-v版本.exe` 安装程序：双击装到 Program Files，可选登录后自动启动，自带卸载；升级时安装程序会先退出旧实例再覆盖。无管理员权限时改用便携 ZIP：完整解压后运行“校园网助手.exe”，请保留`http-worker`和`_internal`目录，不要只复制exe。两者都无需安装Python；用户配置在用户目录的“校园网助手”文件夹，不随应用包分发。
 
 ## 验证边界
 
@@ -103,7 +104,7 @@ Mac：下载macOS-arm64 ZIP，解压后将“校园网助手.app”移到Applica
 '''
 
 
-def windows_assets(app_dir: Path, output: Path, smoke: Path, build_metadata: Path):
+def windows_assets(app_dir: Path, output: Path, smoke: Path, build_metadata: Path, setup_exe: Path | None = None):
     output.mkdir(parents=True,exist_ok=True)
     executable=app_dir/(APP_NAME+'.exe')
     worker=app_dir/'http-worker'/'campus-http-worker.exe'
@@ -125,12 +126,23 @@ def windows_assets(app_dir: Path, output: Path, smoke: Path, build_metadata: Pat
         archive.writestr(APP_NAME+'/README-Windows.md',release_notes())
         archive.writestr(APP_NAME+'/BUILD-INFO.json',json.dumps(report,ensure_ascii=False,indent=2))
     verify_zip(portable)
+    artifacts=[portable]
+    if setup_exe is not None:
+        setup_exe=Path(setup_exe)
+        if not setup_exe.is_file():raise ValueError(f'Missing installer: {setup_exe}')
+        verify_x64_pe(setup_exe)
+        # The installer is copied verbatim into the release set; its filename
+        # already carries the version and "Setup" marker from installer.iss.
+        setup_target=output/setup_exe.name
+        if setup_exe.resolve()!=setup_target.resolve():
+            shutil.copy2(setup_exe,setup_target)
+        artifacts.append(setup_target)
     source=source_zip(output/f'campus-network-assistant-v{__version__}-source.zip')
     summary=output/'build-info.json'
     # Never copy raw smoke paths/process identifiers/credentials; only curated safe flags.
     report['smoke_test']={key:smoke_data.get(key) for key in ('ok','version','platform','frozen','loopback_requests','auth_requests','probe_verified','form_follow_verified','background_timer_verified','worker_name')}
     summary.write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
-    artifacts=[portable,source,summary]
+    artifacts += [source, summary]
     checksums=output/'SHA256SUMS.txt'
     checksums.write_text(''.join(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n' for p in artifacts),encoding='ascii')
     (output/'release-notes.md').write_text(release_notes(),encoding='utf-8')
@@ -180,6 +192,7 @@ if __name__=='__main__':
     win=sub.add_parser('windows');win.add_argument('--app-dir',type=Path,required=True)
     win.add_argument('--output',type=Path,required=True);win.add_argument('--smoke-report',type=Path,required=True)
     win.add_argument('--build-metadata',type=Path,required=True)
+    win.add_argument('--setup-exe',type=Path,default=None)
     mac=sub.add_parser('macos');mac.add_argument('--app',type=Path,required=True)
     mac.add_argument('--output',type=Path,required=True);mac.add_argument('--smoke-report',type=Path,required=True)
     mac.add_argument('--build-metadata',type=Path,required=True)
@@ -189,4 +202,4 @@ if __name__=='__main__':
     elif args.command=='macos':
         for path in mac_assets(args.app,args.output,args.smoke_report,args.build_metadata):print(path)
     else:
-        for path in windows_assets(args.app_dir,args.output,args.smoke_report,args.build_metadata):print(path)
+        for path in windows_assets(args.app_dir,args.output,args.smoke_report,args.build_metadata,args.setup_exe):print(path)

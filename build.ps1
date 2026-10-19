@@ -43,12 +43,33 @@ Invoke-Python -Arguments @("tools\windows_version.py", ".cache\windows-version.t
 Invoke-Python -Arguments @("-m", "PyInstaller", "--noconfirm", "--clean", "--windowed", "--noupx", "--name", $AppName, "--version-file", ".cache\windows-version.txt", "main.py")
 # Console-subsystem helper is hidden by CREATE_NO_WINDOW; no Qt in its entry path.
 Invoke-Python -Arguments @("-m", "PyInstaller", "--noconfirm", "--clean", "--console", "--noupx", "--name", "campus-http-worker", "http_worker.py")
+
+# Feed the exact project version into the Inno preprocessor via version.ini.
+$BuildDir = Join-Path $PSScriptRoot "build"
+if (-not (Test-Path -LiteralPath $BuildDir)) { New-Item -ItemType Directory -Path $BuildDir | Out-Null }
+[System.IO.File]::WriteAllText((Join-Path $BuildDir "version.ini"), "[version]`nvalue=$Version`n")
+
 $AppDir = Join-Path (Join-Path $PSScriptRoot "dist") $AppName
 $WorkerBuild = Join-Path $PSScriptRoot "dist\campus-http-worker"
 $WorkerTarget = Join-Path $AppDir "http-worker"
 if (Test-Path -LiteralPath $WorkerTarget) { throw "Unexpected pre-existing worker directory after clean build" }
 Copy-Item -LiteralPath $WorkerBuild -Destination $WorkerTarget -Recurse
 $OutputExe = Join-Path $AppDir ($AppName + ".exe")
+
+# Compile the Inno Setup installer when iscc is available. The installer packs
+# the SAME verified onedir directory, so no extra smoke test is needed beyond
+# the portable one below; a missing iscc only skips the installer, not the zip.
+$Iscc = Get-Command "iscc.exe" -ErrorAction SilentlyContinue
+$SetupExe = $null
+if ($Iscc) {
+    & $Iscc.Source "installer.iss"
+    if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed" }
+    $SetupExe = Join-Path $PSScriptRoot ("dist\installer\campus-network-assistant-Setup-v" + $Version + ".exe")
+    if (-not (Test-Path -LiteralPath $SetupExe)) { throw "Expected installer output missing: $SetupExe" }
+} else {
+    Write-Warning "iscc.exe (Inno Setup) not found; skipping Setup.exe. The portable ZIP is still produced."
+}
+
 # Use stdout-independent report files: the GUI executable has no console streams.
 $SmokeReport = Join-Path $PSScriptRoot ".cache\windows-smoke.json"
 if (Test-Path -LiteralPath $SmokeReport) { Remove-Item -LiteralPath $SmokeReport }
@@ -67,7 +88,11 @@ if ($SkipTests) {
     Write-Warning "Build complete, but tests were skipped. Release ZIP will not be generated."
 } else {
     $ReleaseDir = Join-Path $PSScriptRoot ("dist\release-v" + $Version)
-    Invoke-Python -Arguments @("tools\package_release.py", "windows", "--app-dir", $AppDir, "--output", $ReleaseDir, "--smoke-report", $SmokeReport, "--build-metadata", ".cache\windows-build-info.json")
+    $PackageArgs = @("tools\package_release.py", "windows", "--app-dir", $AppDir, "--output", $ReleaseDir, "--smoke-report", $SmokeReport, "--build-metadata", ".cache\windows-build-info.json")
+    if ($SetupExe -and (Test-Path -LiteralPath $SetupExe)) {
+        $PackageArgs += @("--setup-exe", $SetupExe)
+    }
+    Invoke-Python -Arguments $PackageArgs
     Write-Host ("Release assets: " + $ReleaseDir)
 }
 Write-Host ("Built: " + $OutputExe)

@@ -113,6 +113,46 @@ def test_release_verifies_pe_and_rejects_unvalidated_windows_build(tmp_path):
         tool.verify_x64_pe(app/'http-worker/campus-http-worker.exe')
 
 
+def test_release_includes_setup_exe_when_present(tmp_path):
+    """A compiled Inno Setup installer is verified as x64 PE and added to the
+    release artifacts and checksum manifest alongside the portable zip."""
+    tool=tool_module()
+    app=tmp_path/'app';app.mkdir()
+    (app/'http-worker/_internal').mkdir(parents=True)
+    (app/'_internal').mkdir()
+    pe(app/'校园网助手.exe');pe(app/'http-worker/campus-http-worker.exe')
+    smoke=tmp_path/'smoke.json'
+    smoke.write_text(json.dumps({'ok':True,'version':__version__,'frozen':True,'platform':'Windows'}))
+    metadata=tmp_path/'metadata.json'
+    metadata.write_text(json.dumps({'tests_passed':True,'version':__version__,'platform':'Windows'}))
+    setup=tmp_path/f'campus-network-assistant-Setup-v{__version__}.exe'
+    pe(setup)
+
+    artifacts=tool.windows_assets(app,tmp_path/'release',smoke,metadata,setup)
+    names=[p.name for p in artifacts]
+    assert f'campus-network-assistant-Setup-v{__version__}.exe' in names
+    checksums=(tmp_path/'release'/'SHA256SUMS.txt').read_text(encoding='ascii')
+    assert f'campus-network-assistant-Setup-v{__version__}.exe' in checksums
+
+    # A non-PE installer is rejected rather than shipped.
+    bad=tmp_path/'bad.exe';bad.write_bytes(b'not-a-pe')
+    with pytest.raises(ValueError):
+        tool.windows_assets(app,tmp_path/'release2',smoke,metadata,bad)
+
+
+def test_installer_script_is_present_and_well_formed():
+    """installer.iss must ship the full onedir layout and never just the exe."""
+    data=Path('installer.iss').read_bytes()
+    # UTF-8 BOM for Inno's preprocessor with the Chinese AppName.
+    assert data.startswith(b'\xef\xbb\xbf')
+    text=data.decode('utf-8-sig')
+    assert 'recursesubdirs' in text and 'createallsubdirs' in text
+    assert 'http-worker' not in text or 'Source:' in text  # full dir, not file picks
+    assert 'PrivilegesRequired=admin' in text
+    assert 'CampusNetworkAssistant' in text  # autostart registry value name
+    assert '{#AppName}.exe' in text
+
+
 def test_powershell_build_script_remains_ascii_and_does_not_disable_tls():
     data=Path('build.ps1').read_bytes()
     assert data.isascii()

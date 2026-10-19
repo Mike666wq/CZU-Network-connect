@@ -40,7 +40,7 @@ if (-not $SkipTests) {
     }
 }
 Invoke-Python -Arguments @("tools\windows_version.py", ".cache\windows-version.txt")
-Invoke-Python -Arguments @("-m", "PyInstaller", "--noconfirm", "--clean", "--windowed", "--noupx", "--name", $AppName, "--version-file", ".cache\windows-version.txt", "main.py")
+Invoke-Python -Arguments @("-m", "PyInstaller", "--noconfirm", "--clean", "--windowed", "--noupx", "--name", $AppName, "--icon", "assets\app-icon.ico", "--add-data", "assets\app-icon.png;.", "--version-file", ".cache\windows-version.txt", "main.py")
 # Console-subsystem helper is hidden by CREATE_NO_WINDOW; no Qt in its entry path.
 Invoke-Python -Arguments @("-m", "PyInstaller", "--noconfirm", "--clean", "--console", "--noupx", "--name", "campus-http-worker", "http_worker.py")
 

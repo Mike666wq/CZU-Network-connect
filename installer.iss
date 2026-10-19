@@ -28,6 +28,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 PrivilegesRequired=admin
 UninstallDisplayIcon={app}\{#AppName}.exe
+SetupIconFile=assets\app-icon.ico
 WizardStyle=modern
 CloseApplications=yes
 CloseApplicationsFilter=*.exe

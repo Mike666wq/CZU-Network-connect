@@ -10,7 +10,8 @@ fi
 VERSION=$("$PYTHON" -c 'from campus_assistant import __version__; print(__version__)')
 "$PYTHON" -c 'import platform,sys; assert sys.platform == "darwin" and platform.machine() == "arm64", "Build the Mac M-series app on an arm64 macOS host"'
 "$PYTHON" -m PyInstaller --noconfirm --clean --windowed --noupx --name "校园网助手" \
-  --target-architecture arm64 --osx-bundle-identifier io.github.Mike666wq.czu-network-connect main.py
+  --target-architecture arm64 --osx-bundle-identifier io.github.Mike666wq.czu-network-connect \
+  --icon assets/app-icon.icns --add-data "assets/app-icon.png:." main.py
 # A console-enabled stdlib-only helper keeps private stdin/stdout IPC independent
 # from the windowed app's stream handling on CI and end-user machines.
 "$PYTHON" -m PyInstaller --noconfirm --clean tools/mac_http_worker.spec

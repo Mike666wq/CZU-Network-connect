@@ -19,7 +19,7 @@ APP_NAME='校园网助手'
 SOURCE_TOP=('main.py','http_worker.py','build.ps1','build.sh','pyproject.toml','requirements.txt',
             'requirements-dev.txt','requirements-windows.txt','requirements-release.txt','README.md','MAC_UI_PREVIEW.md',
             '.gitignore','.gitattributes')
-SOURCE_DIRS=('campus_assistant','tests','tools','docs','.github')
+SOURCE_DIRS=('campus_assistant','tests','tools','docs','.github','assets')
 PRIVATE_NAMES={'config.json','.env','.DS_Store','events.jsonl','events.previous.jsonl'}
 
 
@@ -43,7 +43,7 @@ def allowed_source_files(root=ROOT):
             relative=path.relative_to(root)
             if any(p.startswith('.') and p!='.github' or p in {'__pycache__','.cache'} for p in relative.parts):continue
             if path.name in PRIVATE_NAMES or path.name.startswith(('events.','.env','config.')) or path.suffix in {'.log','.pyc','.png','.key','.pem','.p12','.pfx'}:continue
-            if path.suffix not in {'.py','.md','.txt','.json','.csv','.yml','.yaml','.spec'}:continue
+            if path.suffix not in {'.py','.md','.txt','.json','.csv','.yml','.yaml','.spec','.png','.ico','.icns','.iss'}:continue
             files.append(path)
     return sorted(set(files))
 

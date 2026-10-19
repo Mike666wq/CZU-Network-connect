@@ -108,7 +108,7 @@ class Window(QMainWindow):
             self.countdown_timer.start()
         self.refresh_countdown()
         self.tray = QSystemTrayIcon(self)
-        self.tray.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_ComputerIcon))
+        self.tray.setIcon(self._load_app_icon())
         self.tray.setToolTip("校园网助手")
         tray_menu = QMenu(self)
         for label, slot in (("显示窗口", self.showNormal), ("立即检查", self.start_check), ("退出", self.quit_app)):
@@ -526,6 +526,33 @@ class Window(QMainWindow):
                 for a in values if a.family.name in {"AF_INET", "AF_INET6"} and not a.address.startswith("127.")))
         except Exception:
             return "unknown"
+
+    def _load_app_icon(self):
+        """Load the bundled app icon for the tray and window.
+
+        Frozen builds embed the icon into the exe/bundle; in source runs we
+        load assets/app-icon.png directly. Fall back to the stock computer
+        icon only if the asset is genuinely missing.
+        """
+        from PySide6.QtGui import QIcon
+        candidates = []
+        if getattr(sys, "frozen", False):
+            base = Path(sys.executable).resolve().parent
+            if sys.platform == "darwin":
+                resources = base.parent / "Resources"
+                candidates.append(resources / "app-icon.icns")
+                # PyInstaller's --icon renames the bundle icon this way.
+                candidates.append(resources / "icon-windowed.icns")
+            candidates.append(base / "app-icon.png")
+            candidates.append(base / "_internal" / "app-icon.png")
+        candidates.append(Path(__file__).resolve().parents[1] / "assets" / "app-icon.png")
+        for path in candidates:
+            if path.is_file():
+                icon = QIcon(str(path))
+                if not icon.isNull():
+                    self.setWindowIcon(icon)
+                    return icon
+        return self.style().standardIcon(self.style().StandardPixmap.SP_ComputerIcon)
 
     def cached_network_signature(self, ttl: float = 5.0):
         """Throttle psutil NIC enumeration.

@@ -72,6 +72,12 @@ class Window(QMainWindow):
         self.check_timer.setInterval(1000)
         self.check_timer.timeout.connect(self.update_check_progress)
         self.quit_after_check = False
+        # Reusable watchdog: created once so repeated start_check cycles do not
+        # accumulate QTimer objects over weeks of uptime.
+        self._check_watchdog = QTimer(self)
+        self._check_watchdog.setSingleShot(True)
+        self._check_watchdog.setInterval(120_000)
+        self._check_watchdog.timeout.connect(self._check_watchdog_fired)
         self.loading_config = False
         self.syncing_scene = False
         self.config_dirty = False
@@ -126,6 +132,12 @@ class Window(QMainWindow):
                     self.network_info.reachabilityChanged.connect(lambda *_: self.network_event())
             except (ImportError, AttributeError):
                 self.network_info = None
+        # The Qt Windows backend for QNetworkInformation has long-uptime
+        # instability on Win10 (callbacks stop or flood after days). Prefer
+        # the 60-second signature poll there; native events stay enabled on
+        # macOS where the backend is mature.
+        if sys.platform == "win32":
+            self.network_info = None
         self.start_check()
 
     @Slot()
@@ -447,7 +459,7 @@ class Window(QMainWindow):
             QMessageBox.warning(self, "配置文件无效", f"自动认证已暂停，请修正配置文件后再次重载。\n{exc}")
 
     def current_network_signature(self):
-        signature = self.get_network_signature()
+        signature = self.cached_network_signature()
         if self.network_info is not None:
             signature += f"|reachability:{self.network_info.reachability()}"
         return signature
@@ -515,6 +527,21 @@ class Window(QMainWindow):
         except Exception:
             return "unknown"
 
+    def cached_network_signature(self, ttl: float = 5.0):
+        """Throttle psutil NIC enumeration.
+
+        On Windows, psutil.net_if_addrs() goes through WMI/IPHLPAPI and is a
+        known slow handle-allocating call; polling it every few seconds for a
+        week straight leaks kernel handles on some drivers. A short TTL cache
+        keeps change detection responsive while capping the enumeration rate.
+        """
+        now = time.monotonic()
+        cached = getattr(self, "_sig_cache", None)
+        if cached is not None and now - cached[1] < ttl:
+            return cached[0]
+        signature = self.get_network_signature()
+        self._sig_cache = (signature, now)
+        return signature
     def start_check(self):
         if self.running:
             self.pending = True; return
@@ -535,12 +562,42 @@ class Window(QMainWindow):
         self.thread.finished.connect(self.thread.deleteLater)
         self.check_started = time.monotonic()
         self.check_phase = "正在检查网络"
+        # Watchdog: if the worker thread ever wedges (driver-level network
+        # hang, frozen pipe), force-release the GUI running state so the
+        # scheduler recovers instead of leaving the app stuck for days.
+        self._check_watchdog.start()
         if self.isVisible():
             self.check_timer.start()
         self.update_check_progress()
         self.dashboard.begin(self.running_reason)
         self.refresh_countdown()
         self.thread.start()
+
+    @Slot()
+    def _check_watchdog_fired(self):
+        if not self.running:
+            return
+        # A wedged worker (driver-level network hang, frozen pipe) never emits
+        # finished, so the GUI would sit at running=True forever. Recover by:
+        #  1. invalidating the wedged worker's result via engine.force_reset,
+        #  2. marking the check handled so thread_finished ignores the late
+        #     result (idempotency guard),
+        #  3. unwinding the GUI state through the normal check_done path.
+        self.dashboard.add_event("本轮检查超时未返回，已强制复位后台调度")
+        self.supervisor.force_reset()
+        self.worker_result = None
+        wedged_thread = self.thread
+        try:
+            wedged_thread.quit()
+        except RuntimeError:
+            pass
+        wedged_thread.finished.disconnect(self.thread_finished)
+        self.check_done(Outcome(State.ERROR, "检查超时已自动恢复", 60, reason="watchdog_timeout"),
+                        self.supervisor)
+        if self.quit_after_check:
+            # The wedged thread may never emit finished, so the normal
+            # quit-on-finished path cannot be relied on.
+            QApplication.quit()
 
     @Slot(str, str, object)
     def check_progress(self, phase, message, worker_supervisor):
@@ -571,6 +628,8 @@ class Window(QMainWindow):
 
     def check_done(self, outcome, worker_supervisor):
         self.check_timer.stop()
+        if hasattr(self, "_check_watchdog"):
+            self._check_watchdog.stop()
         self.running = False
         if worker_supervisor is self.supervisor:
             if self.invalid_config:
@@ -591,7 +650,11 @@ class Window(QMainWindow):
             record_event(APP_DIR / "events.jsonl", state=outcome.state.value, scene=detected,
                          next_seconds=outcome.next_seconds,
                          auth_attempted=getattr(self.service, "auth_submitted", False), reason=self.running_reason)
-            if outcome.notify: self.tray.showMessage("校园网认证", outcome.message)
+            if outcome.notify:
+                try:
+                    self.tray.showMessage("校园网认证", outcome.message)
+                except RuntimeError:
+                    pass
             self.supervisor.outcome = outcome
             self.scheduler.reschedule(time.monotonic(), max(1, outcome.next_seconds))
             self.arm_scheduler_timer()
@@ -599,6 +662,9 @@ class Window(QMainWindow):
         else:
             self.pending = True
         if self.quit_after_check:
+            # check_done can run before the thread's finished signal; connect
+            # so quit fires when the thread actually unwinds. thread_finished
+            # covers the ordering where finished arrived first.
             self.thread.finished.connect(QApplication.quit)
             return
         if self.pending:

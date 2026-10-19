@@ -404,8 +404,16 @@ class Dashboard(QWidget):
         entry = f"{stamp}   {message}"
         self.log_entries.append(entry)
         self.log_entries = self.log_entries[-160:]
-        self.events.appendPlainText(entry)
-        self.events.verticalScrollBar().setValue(self.events.verticalScrollBar().maximum())
+        # Suspend widget repaints while appending; long-running sessions add
+        # thousands of lines, and without batching each append forces a full
+        # text re-layout on the GUI thread. The document stays in sync
+        # immediately so tests and screen readers observe the entry at once.
+        self.events.setUpdatesEnabled(False)
+        try:
+            self.events.appendPlainText(entry)
+            self.events.verticalScrollBar().setValue(self.events.verticalScrollBar().maximum())
+        finally:
+            self.events.setUpdatesEnabled(True)
         if hasattr(self, "recent"):
             self.recent.setText("\n".join(self.log_entries[-3:]))
 

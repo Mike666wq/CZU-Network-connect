@@ -73,6 +73,10 @@ class FakeSignal:
     def connect(self, callback):
         self.callbacks.append(callback)
 
+    def disconnect(self, callback):
+        if callback in self.callbacks:
+            self.callbacks.remove(callback)
+
     def emit(self):
         for callback in list(self.callbacks):
             callback()
@@ -265,6 +269,68 @@ def test_worker_unexpected_exception_still_returns_safe_result():
     assert len(results) == 1
     assert results[0].state == State.ERROR
     assert "secret" not in results[0].message
+
+
+def test_watchdog_recovers_wedged_worker_and_is_idempotent(gui, monkeypatch):
+    """A wedged worker must not leave running=True forever, and a late real
+    result must not double-process check_done."""
+    window = gui.window
+    window.running = True
+    window.running_reason = "heartbeat"
+
+    class FakeThread:
+        def __init__(self):
+            self.finished = FakeSignal()
+        def quit(self):
+            pass
+
+    window.thread = FakeThread()
+    recorded: list[Outcome] = []
+    real_check_done = main.Window.check_done
+
+    def tracking_check_done(self, outcome, worker_supervisor):
+        recorded.append(outcome)
+        real_check_done(self, outcome, worker_supervisor)
+
+    monkeypatch.setattr(main.Window, "check_done", tracking_check_done)
+    monkeypatch.setattr(window, "arm_scheduler_timer", lambda: None)
+
+    window._check_watchdog_fired()
+
+    assert not window.running
+    assert len(recorded) == 1
+    assert recorded[0].reason == "watchdog_timeout"
+    assert window.supervisor.outcome.reason == "watchdog_timeout"
+
+    # The wedged worker eventually emits finished: thread_finished was
+    # disconnected by the watchdog, so the stale result is never processed.
+    window.worker_result = (Outcome(State.ONLINE, "stale", 600), window.supervisor)
+    window.thread.finished.emit()
+    assert len(recorded) == 1
+    assert window.supervisor.outcome.reason == "watchdog_timeout"
+
+
+def test_engine_force_reset_discards_wedged_worker_result(gui):
+    """After force_reset, a wedged worker's late check() result is discarded
+    by the generation guard and a fresh check() can proceed."""
+    from campus_assistant.engine import Supervisor
+
+    outcomes = []
+
+    def probe():
+        return True, "fake"
+
+    supervisor = Supervisor(probe, lambda: False, lambda: None)
+    old_lock = supervisor.lock
+    old_generation = supervisor.generation
+
+    supervisor.force_reset()
+
+    assert supervisor.lock is not old_lock
+    assert supervisor.generation == old_generation + 1
+    # A fresh check acquires the new lock and completes normally.
+    outcome = supervisor.check()
+    assert outcome.state == State.ONLINE
 
 
 def test_dorm_provider_dropdown_saves_explicit_choice(gui):

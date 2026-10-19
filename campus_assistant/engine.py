@@ -105,6 +105,21 @@ class Supervisor:
         else:
             self.cancel.clear()
 
+    def force_reset(self) -> None:
+        """Recover from a wedged worker that never returned from check().
+
+        A worker stuck in a driver-level network call never reaches the
+        finally block, so self.lock stays held forever and every later
+        check() silently returns the stale outcome. Swap in a fresh lock and
+        bump the generation so the wedged worker's eventual result (if it ever
+        returns) is discarded by the generation guards instead of corrupting
+        the recovered state.
+        """
+        self.lock = Lock()
+        self.generation += 1
+        self._scene_generation = None
+        self.cancel.set()
+
     def network_changed(self, network_id: str) -> None:
         if network_id != self.last_network_id:
             self.last_network_id = network_id

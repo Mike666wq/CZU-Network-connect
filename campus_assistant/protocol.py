@@ -8,6 +8,7 @@ import base64
 import subprocess
 import sys
 import os
+import threading
 from pathlib import Path
 import time
 from urllib.parse import urlsplit, urljoin
@@ -128,6 +129,12 @@ class BoundedHttp:
     Separate from the GUI entry path; no multiprocessing/resource_tracker daemon.
     The exact proxy bypass, TLS checks, body bounds and redirect rules are unchanged.
     Credentials travel over private stdin, not command-line arguments or log files.
+
+    Long-running note: a single blocking communicate() is paired with a daemon
+    watchdog thread that terminates the child on deadline/cancel. The previous
+    50 ms polling loop created hundreds of short-lived pipe reader threads per
+    request on Windows; after days of uptime the accumulated handle churn could
+    stall the GUI process.
     """
 
     def __init__(self, timeout: float = 4.0):
@@ -166,18 +173,38 @@ class BoundedHttp:
             options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
             process = subprocess.Popen(self._worker_command(), stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, **options)
-            first = True
-            while True:
+
+            # Watchdog enforces the total deadline and cooperative cancellation
+            # while the main thread blocks in a single communicate() call.
+            stop_watchdog = threading.Event()
+
+            def watchdog():
+                while not stop_watchdog.wait(0.05):
+                    if self.cancel_check() or time.monotonic() >= deadline:
+                        try:
+                            process.kill()
+                        except OSError:
+                            pass
+                        return
+
+            watcher = threading.Thread(target=watchdog, daemon=True)
+            watcher.start()
+            try:
+                output, _ = process.communicate(input=payload)
+            finally:
+                stop_watchdog.set()
+                watcher.join(timeout=0.5)
+
+            if self.cancel_check():
+                raise PortalError("检查已取消")
+            if process.returncode is None:
+                # Watchdog killed the child for deadline/cancel.
                 if self.cancel_check():
                     raise PortalError("检查已取消")
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise PortalError("请求总超时")
-                try:
-                    output, _ = process.communicate(input=payload if first else None, timeout=min(0.05, remaining))
-                    break
-                except subprocess.TimeoutExpired:
-                    first = False
+                raise PortalError("请求总超时")
+            if process.returncode != 0 and time.monotonic() >= deadline:
+                # Killed by the watchdog after the deadline expired.
+                raise PortalError("请求总超时")
             if process.returncode != 0 or len(output) > 2_000_000:
                 raise PortalError("网络请求进程异常")
             response = json.loads(output)

@@ -22,7 +22,11 @@ def record_event(path: Path, *, state: str, scene: str, next_seconds: int,
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists() and path.stat().st_size > 1_000_000:
-            path.replace(path.with_name('events.previous.jsonl'))
+            previous = path.with_name('events.previous.jsonl')
+            # Windows os.replace refuses an existing destination unless it is
+            # removed first; drop the stale archive so rotation never fails.
+            previous.unlink(missing_ok=True)
+            path.replace(previous)
         with path.open('a', encoding='utf-8') as stream:
             stream.write(json.dumps(event, ensure_ascii=False) + '\n')
         try:

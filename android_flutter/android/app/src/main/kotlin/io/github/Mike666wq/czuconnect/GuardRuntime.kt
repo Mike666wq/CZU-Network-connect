@@ -70,18 +70,18 @@ object GuardRuntime {
     fun stop() {
         running = false
         generation.incrementAndGet()
-        AndroidHttp.cancelAll()
         snapshot = JSONObject(snapshot).put("status", "已停止").put("online", false)
             .put("message", "自动守护已停止").put("nextSeconds", 0).toString()
         // This method only sets cancellation/generation; it never waits on the worker lock.
         try { bridge?.callAttr("stop") } catch (_: Exception) { fail() }
+        AndroidHttp.cancelAll()
         worker.post { try { bridge?.let { publish(it) } } catch (_: Exception) { fail() } }
     }
 
     fun networkChanged(id: String) {
         generation.incrementAndGet()
-        AndroidHttp.cancelAll()
         try { bridge?.callAttr("network_changed", id) } catch (_: Exception) { fail() }
+        AndroidHttp.cancelAll()
         snapshot = JSONObject(snapshot).put("status", "等待检查").put("online", false)
             .put("message", "网络或配置变化，等待重新检查").put("nextSeconds", 0).toString()
     }

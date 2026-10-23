@@ -61,6 +61,21 @@ void main() {
   List<MethodCall> methodCalls(String method) =>
       calls.where((call) => call.method == method).toList();
 
+  void expectActionCalls(List<String> methods) {
+    // Animated scrolling can advance the legitimate periodic status poll.
+    expect(
+      calls.where((call) => call.method != 'getStatus').map((call) => call.method),
+      methods,
+    );
+    final actionIndex =
+        calls.lastIndexWhere((call) => call.method == methods.last);
+    expect(
+      calls.skip(actionIndex + 1).map((call) => call.method),
+      contains('getStatus'),
+      reason: 'The action must be followed by a native status refresh.',
+    );
+  }
+
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     config = emptyConfig();
@@ -289,8 +304,7 @@ void main() {
     await launch(tester);
     calls.clear();
     await tapKey(tester, 'connect');
-    expect(calls.map((call) => call.method),
-        ['saveConfig', 'connectNow', 'getStatus']);
+    expectActionCalls(['saveConfig', 'connectNow']);
     expect(methodCalls('connectNow').single.arguments, isNull);
     expect(find.text('立即连接并守护'), findsOneWidget);
     expect(find.text('连接及守护请求已发送，检查已排队'), findsOneWidget);
@@ -326,14 +340,13 @@ void main() {
     status['running'] = false;
     status['online'] = true;
     await tapKey(tester, 'guard');
-    expect(calls.map((call) => call.method), ['stopGuard', 'getStatus']);
+    expectActionCalls(['stopGuard']);
     expect(find.text('未守护'), findsOneWidget);
     expect(find.text('网络在线'), findsOneWidget);
     expect(find.text('下次检查：37 秒'), findsNothing);
     calls.clear();
     await tapKey(tester, 'guard');
-    expect(calls.map((call) => call.method),
-        ['saveConfig', 'startGuard', 'getStatus']);
+    expectActionCalls(['saveConfig', 'startGuard']);
     // A queued start does not invent a running state before native confirms it.
     expect(find.text('未守护'), findsOneWidget);
   });
@@ -467,9 +480,8 @@ void main() {
       await settings(tester);
       calls.clear();
       await tapKey(tester, permission.key);
-      expect(calls.map((call) => call.method),
-          [permission.value, 'getStatus']);
-      expect(calls.first.arguments, isNull);
+      expectActionCalls([permission.value]);
+      expect(methodCalls(permission.value).single.arguments, isNull);
       expect(methodCalls('saveConfig'), isEmpty);
     });
   }

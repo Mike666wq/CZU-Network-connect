@@ -36,3 +36,29 @@ def record_event(path: Path, *, state: str, scene: str, next_seconds: int,
         return True
     except OSError:
         return False
+
+
+def record_block(path: Path, *, reason: str, category: str, detail: str,
+                 portal_keys: dict | None = None) -> bool:
+    """Persist an AUTH_BLOCKED event so the next 'program is stuck' report can be
+    diagnosed from the log alone. Never stores credentials or response bodies."""
+    event = {
+        'version': __version__,
+        'time': datetime.now(ZoneInfo('Asia/Shanghai')).isoformat(),
+        'event': 'auth_blocked',
+        'reason': str(reason)[:200],
+        'category': str(category)[:64],
+        'detail': str(detail)[:200],
+        'portal_keys': sorted(str(k) for k in (portal_keys or {}).keys()),
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open('a', encoding='utf-8') as stream:
+            stream.write(json.dumps(event, ensure_ascii=False) + '\n')
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        return True
+    except OSError:
+        return False

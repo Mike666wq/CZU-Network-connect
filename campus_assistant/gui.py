@@ -20,7 +20,7 @@ from campus_assistant.config import APP_DIR, CONFIG_PATH, DORM_PROVIDERS, Config
 from campus_assistant.engine import Outcome, State, Supervisor, in_midnight_recovery
 from campus_assistant.service import CampusService
 from campus_assistant.scheduler import PollScheduler
-from campus_assistant.audit import record_event
+from campus_assistant.audit import record_event, record_block
 from campus_assistant.dashboard import build_workspace, countdown_remaining
 from campus_assistant.platform_ui import platform_name
 
@@ -677,6 +677,15 @@ class Window(QMainWindow):
             record_event(APP_DIR / "events.jsonl", state=outcome.state.value, scene=detected,
                          next_seconds=outcome.next_seconds,
                          auth_attempted=getattr(self.service, "auth_submitted", False), reason=self.running_reason)
+            if self.supervisor.auth_blocked and not getattr(self, "_block_logged", False):
+                record_block(APP_DIR / "events.jsonl",
+                             reason=self.supervisor.blocked_reason,
+                             category=self.supervisor.blocked_state.value,
+                             detail=self.supervisor.blocked_message,
+                             portal_keys=getattr(self.service, "portal_settings", {}))
+                self._block_logged = True
+            elif not self.supervisor.auth_blocked:
+                self._block_logged = False
             if outcome.notify:
                 try:
                     self.tray.showMessage("校园网认证", outcome.message)
@@ -701,6 +710,14 @@ class Window(QMainWindow):
         presentation = self.dashboard.finish(
             outcome, getattr(self.service, "auth_submitted", False))
         self.status_label.setText(presentation.detail)
+        # Surface AUTH_BLOCKED prominently: red tone on the status line so a
+        # permanently-stuck guard cannot hide in the normal muted styling.
+        if self.supervisor.auth_blocked:
+            self.status_label.setProperty("tone", "error")
+            self.status_label.setStyleSheet("color: #f08a8a; font-weight: 600;")
+        else:
+            self.status_label.setProperty("tone", "")
+            self.status_label.setStyleSheet("")
 
         self.clear_setting_attention()
         reason = outcome.reason

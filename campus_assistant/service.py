@@ -67,6 +67,7 @@ class CampusService:
         self.progress = lambda phase, message: None
         self.captive_host = ""
         self.auth_submitted = False
+        self.protocol_warnings: list[str] = []
 
     def set_cancel_check(self, callback):
         self.cancel_check = callback
@@ -240,13 +241,30 @@ class CampusService:
             if str(response.get("code", "1")) != "1":
                 return PortalResult(False, "temporary", "门户配置暂时不可用")
             # Never guess any password transform or an alternate login mode.
-            wanted = {"login_method": "1", "enable_r3": "0", "en_md5": "0", "password_cut": "0",
-                      "account_suffix": "", "account_prefix": "0" if self.profile_name == "dorm" else "1", "io_mode": "0"}
-            for key, expected in wanted.items():
+            # Critical keys: a mismatch means login will actually fail; block hard.
+            critical = {"login_method": "1", "en_md5": "0", "password_cut": "0"}
+            # For the dorm profile the account_prefix chooses between raw and
+            # ",0,"-prefixed usernames; never guess that on the user's behalf.
+            if self.profile_name == "dorm":
+                critical["account_prefix"] = "0"
+            # Advisory keys: portal may legitimately change these after a server
+            # upgrade; warn but still attempt login so a backend tweak does not
+            # permanently brick the guard.
+            advisory = {"enable_r3": "0", "account_suffix": "",
+                        "account_prefix": "0" if self.profile_name == "dorm" else "1",
+                        "io_mode": "0"}
+            # Keys promoted to critical above must not double-report as warnings.
+            for key in critical:
+                advisory.pop(key, None)
+            for key, expected in critical.items():
                 if str(settings.get(key, "")) != expected:
                     return PortalResult(False, "configuration",
                                         f"门户参数 {key} 与已验证设置不同，已阻止登录",
                                         "portal_protocol_mismatch")
+            warnings = [f"{key}={settings.get(key, '')}" for key, expected in advisory.items()
+                        if str(settings.get(key, "")) != expected]
+            if warnings:
+                self.protocol_warnings = warnings
         except PortalError as exc:
             return PortalResult(False, "temporary", "读取门户配置失败：" + self._safe_error(exc) + "；未发送凭据")
         if status != 200 or self.http.last_headers.get("Location"):

@@ -67,6 +67,10 @@ def interval_for(now: datetime, internet: bool, failures: int = 0, *, blocked: b
 class Supervisor:
     """Serialized check state machine; callbacks perform isolated probes."""
 
+    # After an AUTH_BLOCKED, automatically retry once after this cooldown so a
+    # transient portal config change does not permanently wedge the guard.
+    AUTH_BLOCK_COOLDOWN_SECONDS = 300
+
     def __init__(self, probe: Callable[[], tuple[bool, str]],
                  identify_portal: Callable[[], bool],
                  authenticate: Callable[[], PortalResult],
@@ -91,6 +95,7 @@ class Supervisor:
         self.enabled = True
         self.auth_blocked = False
         self.auth_notice_sent = False
+        self.auth_blocked_at: float = 0.0
         self.unknown_count = 0
         self.offline_count = 0
         self.last_network_id: str | None = None
@@ -200,6 +205,15 @@ class Supervisor:
                 if self.auth_blocked and scene != self.blocked_scene:
                     self.auth_blocked = False
                     self.auth_notice_sent = False
+                    self.auth_blocked_at = 0.0
+                # Cooldown: a blocked guard retries once after the cooldown so a
+                # transient portal hiccup does not wedge the machine forever.
+                if (self.auth_blocked and not force and self.auth_blocked_at
+                        and self.now().timestamp() - self.auth_blocked_at
+                        >= self.AUTH_BLOCK_COOLDOWN_SECONDS):
+                    self.auth_blocked = False
+                    self.auth_notice_sent = False
+                    self.auth_blocked_at = 0.0
                 if self.auth_blocked and not force:
                     self.outcome = Outcome(self.blocked_state, self.blocked_message,
                                            interval_for(self.now(), False, self.offline_count, blocked=True),
@@ -239,6 +253,7 @@ class Supervisor:
                                            reason=reason)
                 elif result.category in {"configuration", "account", "disabled", "debt"}:
                     self.auth_blocked = True
+                    self.auth_blocked_at = self.now().timestamp()
                     self.blocked_scene = getattr(service, "profile_name", "")
                     self.blocked_state = State.NEEDS_CONFIG if result.category == "configuration" else State.AUTH_BLOCKED
                     self.blocked_reason = result.detail or result.category

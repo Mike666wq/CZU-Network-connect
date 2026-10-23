@@ -1,0 +1,30 @@
+# Flutter/Dart generated state
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+coverage/
+
+# Machine-specific Android SDK/Gradle state and Flutter-generated wrapper
+android/.gradle/
+android/.kotlin/
+android/captures/
+android/local.properties
+android/gradlew
+android/gradlew.bat
+android/gradle/wrapper/gradle-wrapper.jar
+GeneratedPluginRegistrant.java
+
+# CI staging, reports and APK exports
+ci-reports/
+ci-artifacts/
+*.apk
+*.aab
+
+# Signing credentials
+android/key.properties
+*.jks
+*.keystore

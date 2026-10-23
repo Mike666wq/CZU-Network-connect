@@ -1,48 +1,301 @@
-name: Android Flutter APK
+name: Android Flutter CI and debug APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'codex/**']
     paths:
       - 'android_flutter/**'
+      - 'campus_assistant/**'
+      - '.github/workflows/android_flutter.yml'
+  pull_request:
+    paths:
+      - 'android_flutter/**'
+      - 'campus_assistant/**'
       - '.github/workflows/android_flutter.yml'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: android-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  PYTHONUNBUFFERED: '1'
+  QT_QPA_PLATFORM: offscreen
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  checks:
+    name: Python and Flutter checks
+    runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      
-      - name: Setup Flutter
-        uses: subosito/flutter-action@48cafc24713cca54bbe03cdc3a423187d413aafa # v2.16.0
+        with:
+          persist-credentials: false
+      - run: mkdir -p android_flutter/ci-reports
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+      - name: Install headless Qt runtime and Python test dependencies (CI only)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libegl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0
+          python3 - <<'PY'
+          import pathlib
+          import subprocess
+          import sys
+          import tomllib
+
+          project = tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']
+          subprocess.run([sys.executable, '-m', 'pip', 'install', *project['dependencies'], 'pytest'], check=True)
+          PY
+      - name: Run the entire Python regression suite, including Qt offscreen
+        run: python3 -m pytest -q tests --junitxml=android_flutter/ci-reports/python-tests.xml 2>&1 | tee android_flutter/ci-reports/python-tests.log
+      - name: Run Android Python bridge unit tests
+        run: |
+          python3 - <<'PY'
+          import unittest
+
+          suite = unittest.defaultTestLoader.discover('android_flutter/tests')
+          assert suite.countTestCases() > 0, 'Android bridge tests must not be empty'
+          PY
+          python3 -m unittest discover -s android_flutter/tests -v 2>&1 | tee android_flutter/ci-reports/bridge-tests.log
+      - name: Stage the shared core for Android
+        run: python3 android_flutter/tools/stage_core.py 2>&1 | tee android_flutter/ci-reports/staging.log
+      - uses: subosito/flutter-action@44ac965b96f18d999802d4b807e3256d5a3f9fa1 # v2.16.0
         with:
           flutter-version: '3.24.0'
-          channel: 'stable'
-          cache: true
-      
-      - name: Setup Java
-        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-      
-      - name: Analyze code
+          channel: stable
+          cache: false
+      - name: Resolve Flutter dependencies
         working-directory: android_flutter
-        run: flutter analyze
-      
-      - name: Build APK
+        run: flutter pub get 2>&1 | tee ci-reports/flutter-pub.log
+      - name: Analyze Flutter
         working-directory: android_flutter
-        run: flutter build apk --debug
-      
-      - name: Upload APK
+        run: flutter analyze 2>&1 | tee ci-reports/flutter-analyze.log
+      - name: Test Flutter
+        working-directory: android_flutter
+        run: flutter test --reporter expanded 2>&1 | tee ci-reports/flutter-tests.log
+      - name: Upload check reports and failure logs
+        if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: android-debug-apk
-          path: android_flutter/build/app/outputs/flutter-apk/app-debug.apk
+          name: android-checks
+          path: android_flutter/ci-reports/
+          if-no-files-found: warn
+          retention-days: 14
+
+  instrumentation:
+    name: Android API ${{ matrix.api-level }} integration
+    needs: checks
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [26, 34]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - run: mkdir -p android_flutter/ci-reports android_flutter/ci-artifacts
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@44ac965b96f18d999802d4b807e3256d5a3f9fa1 # v2.16.0
+        with:
+          flutter-version: '3.24.0'
+          channel: stable
+          cache: false
+      - name: Stage the shared core for Android
+        run: python3 android_flutter/tools/stage_core.py 2>&1 | tee android_flutter/ci-reports/staging.log
+      - name: Build x86_64 debug APK and prepare the Gradle wrapper
+        working-directory: android_flutter
+        run: |
+          flutter pub get 2>&1 | tee ci-reports/flutter-pub.log
+          flutter build apk --debug --target-platform android-x64 2>&1 | tee ci-reports/flutter-build.log
+          test -f android/gradlew
+          chmod +x android/gradlew
+      - name: Enable emulator KVM access
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -r /dev/kvm
+          test -w /dev/kvm
+      - name: Run native CoreIntegrationTest on the emulator
+        uses: ReactiveCircus/android-emulator-runner@1dcd0090116d15e7c562f8db72807de5e036a4ed # v2.34.0
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-linux-hw-accel: false
+          emulator-boot-timeout: 300
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          working-directory: android_flutter/android
+          # The action invokes sh; explicitly use Bash pipefail to preserve Gradle failures.
+          script: bash -euo pipefail -c 'trap "adb logcat -d > ../ci-reports/logcat.txt 2>&1" EXIT; ./gradlew app:connectedDebugAndroidTest -Ptarget-platform=android-x64 --stacktrace 2>&1 | tee ../ci-reports/instrumentation.log'
+      - name: Require executed instrumentation tests and record results
+        env:
+          API_LEVEL: ${{ matrix.api-level }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import xml.etree.ElementTree as ET
+
+          root = pathlib.Path('android_flutter/build/app/outputs/androidTest-results/connected')
+          reports = sorted(root.rglob('TEST-*.xml'))
+          assert reports, 'No instrumentation JUnit reports were produced'
+          suites = []
+          for report in reports:
+              suites.extend(ET.parse(report).getroot().iter('testsuite'))
+          executed = sum(int(s.get('tests', 0)) - int(s.get('skipped', 0)) for s in suites)
+          assert executed > 0, 'Instrumentation must execute tests'
+          assert all(int(s.get('failures', 0)) == 0 and int(s.get('errors', 0)) == 0 for s in suites)
+          metadata = {
+              'source_sha': os.environ['GITHUB_SHA'],
+              'run_id': os.environ['GITHUB_RUN_ID'],
+              'api_level': int(os.environ['API_LEVEL']),
+              'abi': 'x86_64',
+              'executed_tests': executed,
+              'junit_reports': [str(p) for p in reports],
+          }
+          pathlib.Path('android_flutter/ci-reports/instrumentation.json').write_text(json.dumps(metadata, indent=2) + '\n')
+          PY
+      - name: Verify and checksum the emulator application and test APKs
+        run: |
+          sdk_root="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          signer="$sdk_root/build-tools/34.0.0/apksigner"
+          cp android_flutter/build/app/outputs/apk/debug/app-debug.apk android_flutter/ci-artifacts/app-debug-x86_64.apk
+          cp android_flutter/build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk android_flutter/ci-artifacts/app-debug-androidTest.apk
+          for apk in android_flutter/ci-artifacts/*.apk; do
+            "$signer" verify --verbose --print-certs "$apk"
+          done 2>&1 | tee android_flutter/ci-reports/apksigner.txt
+          (cd android_flutter/ci-artifacts && sha256sum ./*.apk > SHA256SUMS && sha256sum --check SHA256SUMS)
+      - name: Upload emulator APKs, reports and failure logs
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: android-api-${{ matrix.api-level }}-x86_64-tests
+          path: |
+            android_flutter/ci-artifacts/
+            android_flutter/ci-reports/
+            android_flutter/build/app/reports/androidTests/
+            android_flutter/build/app/outputs/androidTest-results/
+          if-no-files-found: warn
+          retention-days: 14
+
+  arm64-debug:
+    name: Verified arm64 debug APK
+    needs: [checks, instrumentation]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - run: mkdir -p android_flutter/ci-reports android_flutter/ci-artifacts
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@44ac965b96f18d999802d4b807e3256d5a3f9fa1 # v2.16.0
+        with:
+          flutter-version: '3.24.0'
+          channel: stable
+          cache: false
+      - name: Stage the shared core for Android
+        run: python3 android_flutter/tools/stage_core.py 2>&1 | tee android_flutter/ci-reports/staging.log
+      - name: Build arm64 debug APK after both emulator jobs pass
+        working-directory: android_flutter
+        run: |
+          flutter pub get 2>&1 | tee ci-reports/flutter-pub.log
+          flutter build apk --debug --target-platform android-arm64 2>&1 | tee ci-reports/flutter-build.log
+          cp build/app/outputs/flutter-apk/app-debug.apk ci-artifacts/czuconnect-0.5.0+2-arm64-debug.apk
+          flutter --version --machine > ci-reports/flutter-version.json
+      - name: Verify debug signature, ABI, versions and SHA256
+        run: |
+          sdk_root="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          apk=android_flutter/ci-artifacts/czuconnect-0.5.0+2-arm64-debug.apk
+          "$sdk_root/build-tools/34.0.0/apksigner" verify --verbose --print-certs "$apk" 2>&1 | tee android_flutter/ci-reports/apksigner.txt
+          "$sdk_root/build-tools/34.0.0/aapt" dump badging "$apk" > android_flutter/ci-reports/apk-badging.txt
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import re
+          import subprocess
+          import sys
+          import zipfile
+          from campus_assistant import __version__
+
+          root = pathlib.Path('android_flutter')
+          version = re.search(r'^version:\s*(\S+)', (root / 'pubspec.yaml').read_text(), re.M).group(1)
+          assert version == '0.5.0+2'
+          staged_init = root / 'android/app/build/generated/python/campus_assistant/__init__.py'
+          assert staged_init.read_bytes() == pathlib.Path('campus_assistant/__init__.py').read_bytes(), 'Staged core version source differs from repository'
+          apk = root / 'ci-artifacts/czuconnect-0.5.0+2-arm64-debug.apk'
+          with zipfile.ZipFile(apk) as archive:
+              abis = {p.split('/')[1] for p in archive.namelist() if p.startswith('lib/') and p.endswith('.so')}
+          assert abis == {'arm64-v8a'}, f'Unexpected APK native ABIs: {abis}'
+          badging = (root / 'ci-reports/apk-badging.txt').read_text()
+          assert "versionCode='2'" in badging and "versionName='0.5.0'" in badging
+          digest = hashlib.sha256(apk.read_bytes()).hexdigest()
+          metadata = {
+              'android_version': version,
+              'core_version': __version__,
+              'source_sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'run_url': f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
+              'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'artifact': apk.name,
+              'sha256': digest,
+              'abi': 'arm64-v8a',
+              'build_type': 'debug',
+              'signature': 'apksigner verified; CI debug key, not a release identity',
+              'python_build_version': sys.version,
+              'chaquopy_version': '17.1.0',
+              'agp_version': '8.3.0',
+              'gradle_version': '8.4',
+              'java_version': '17',
+              'flutter': json.loads((root / 'ci-reports/flutter-version.json').read_text()),
+              'gates': ['Python and Qt offscreen', 'Android bridge unittest', 'Flutter analyze', 'Flutter test', 'API 26 x86_64 instrumentation', 'API 34 x86_64 instrumentation'],
+              'arm64_device_tested': False,
+              'real_campus_tested': False,
+          }
+          (root / 'ci-artifacts/build-info.json').write_text(json.dumps(metadata, indent=2) + '\n')
+          (root / 'ci-artifacts/SHA256SUMS').write_text(f'{digest}  {apk.name}\n')
+          PY
+          (cd android_flutter/ci-artifacts && sha256sum --check SHA256SUMS)
+          cp android_flutter/ci-reports/apksigner.txt android_flutter/ci-reports/apk-badging.txt android_flutter/ci-artifacts/
+      - name: Upload verified arm64 debug package
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: android-0.5.0+2-arm64-debug
+          path: android_flutter/ci-artifacts/
           if-no-files-found: error
+          retention-days: 14
+      - name: Upload packaging reports and failure logs
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: android-arm64-packaging-reports
+          path: android_flutter/ci-reports/
+          if-no-files-found: warn
           retention-days: 14

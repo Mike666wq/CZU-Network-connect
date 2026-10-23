@@ -2,6 +2,7 @@ plugins {
     id "com.android.application"
     id "kotlin-android"
     id "dev.flutter.flutter-gradle-plugin"
+    id "com.chaquo.python"
 }
 
 def localProperties = new Properties()
@@ -21,6 +22,8 @@ def flutterVersionName = localProperties.getProperty('flutter.versionName')
 if (flutterVersionName == null) {
     flutterVersionName = '1.0'
 }
+def targetAbis = (project.findProperty("target-platform") ?: "android-arm64,android-x64")
+    .split(",").collect { ["android-arm64": "arm64-v8a", "android-x64": "x86_64"][it] }.findAll { it }
 
 android {
     namespace "io.github.Mike666wq.czuconnect"
@@ -45,6 +48,8 @@ android {
         targetSdk 34
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        ndk { abiFilters.addAll(targetAbis) }
     }
 
     buildTypes {
@@ -52,6 +57,39 @@ android {
             signingConfig signingConfigs.debug
         }
     }
+}
+
+chaquopy {
+    defaultConfig {
+        version = "3.11"
+        pip { install "tzdata==2025.2" }
+    }
+    sourceSets {
+        main {
+            srcDirs = ["../../python", "build/generated/python"]
+        }
+        debug { srcDir "../../device_tests" }
+    }
+}
+
+tasks.register("stagePythonCore", Exec) {
+    workingDir "../../.."
+    commandLine "python3", "android_flutter/tools/stage_core.py"
+    inputs.dir "../../../campus_assistant"
+    outputs.dir "build/generated/python/campus_assistant"
+}
+tasks.configureEach {
+    if (name.endsWith("PythonSources") || name == "preBuild") {
+        dependsOn "stagePythonCore"
+    }
+}
+
+dependencies {
+    implementation "com.squareup.okhttp3:okhttp:4.12.0"
+    androidTestImplementation "androidx.test:runner:1.5.2"
+    androidTestImplementation "androidx.test:rules:1.5.0"
+    androidTestImplementation "androidx.test.ext:junit:1.1.5"
+    androidTestImplementation "com.squareup.okhttp3:mockwebserver:4.12.0"
 }
 
 flutter {

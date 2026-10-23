@@ -12,6 +12,7 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.Proxy
+import java.net.InetAddress
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -43,7 +44,9 @@ object AndroidHttp {
             .connectTimeout(timeoutMs, TimeUnit.MILLISECONDS).readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
         wifi?.let { network ->
             builder.socketFactory(network.socketFactory)
-            builder.dns(Dns { host -> network.getAllByName(host).toList() })
+            builder.dns(object : Dns {
+                override fun lookup(hostname: String): List<InetAddress> = network.getAllByName(hostname).toList()
+            })
         }
         val headers = JSONObject(headersJson)
         headers.keys().forEach { key -> request.header(key, headers.getString(key)) }

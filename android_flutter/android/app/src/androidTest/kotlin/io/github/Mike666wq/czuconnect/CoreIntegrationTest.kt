@@ -81,6 +81,7 @@ class CoreIntegrationTest {
                 "/slow", "/cancel" -> MockResponse().setBody("slow").setBodyDelay(3, TimeUnit.SECONDS)
                 "/large" -> MockResponse().setHeader("Content-Encoding", "gzip")
                     .setBody(Buffer().write(compressed.toByteArray()))
+                "/raw-gzip" -> MockResponse().setBody(Buffer().write(compressed.toByteArray()))
                 "/redirect" -> MockResponse().setResponseCode(302).setHeader("Location", "http://untrusted.invalid/")
                 else -> MockResponse().setResponseCode(404)
             }
@@ -99,6 +100,9 @@ class CoreIntegrationTest {
             val large = AndroidHttp.start(server.url("/large").toString(), "{}", 3000)
             assertTrue(large.awaitDone(4000))
             try { large.result(); fail("oversized inflated body accepted") } catch (_: java.io.IOException) { }
+            val rawGzip = AndroidHttp.start(server.url("/raw-gzip").toString(), "{}", 3000)
+            assertTrue(rawGzip.awaitDone(4000))
+            try { rawGzip.result(); fail("oversized headerless gzip accepted") } catch (_: java.io.IOException) { }
             val redirect = AndroidHttp.start(server.url("/redirect").toString(), "{}", 1000)
             assertTrue(redirect.awaitDone(2000))
             assertEquals(302, JSONObject(redirect.result()).getInt("status"))

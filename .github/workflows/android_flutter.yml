@@ -105,6 +105,23 @@ jobs:
         with:
           persist-credentials: false
       - run: mkdir -p android_flutter/ci-reports android_flutter/ci-artifacts
+      - name: Enable emulator KVM access
+        run: |
+          lscpu
+          if [ ! -e /dev/kvm ]; then
+            if grep -qm1 '\bsvm\b' /proc/cpuinfo; then
+              sudo modprobe kvm_amd
+            else
+              sudo modprobe kvm_intel
+            fi
+          fi
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo udevadm settle
+          sudo chmod a+rw /dev/kvm
+          ls -l /dev/kvm
+          python3 -c 'import os; os.close(os.open("/dev/kvm", os.O_RDWR))'
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.11'
@@ -126,13 +143,6 @@ jobs:
           flutter build apk --debug --target-platform android-x64 2>&1 | tee ci-reports/flutter-build.log
           test -f android/gradlew
           chmod +x android/gradlew
-      - name: Enable emulator KVM access
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-          test -r /dev/kvm
-          test -w /dev/kvm
       - name: Run native CoreIntegrationTest on the emulator
         uses: ReactiveCircus/android-emulator-runner@1dcd0090116d15e7c562f8db72807de5e036a4ed # v2.34.0
         with:

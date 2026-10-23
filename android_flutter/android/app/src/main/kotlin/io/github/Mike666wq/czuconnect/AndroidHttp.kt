@@ -11,6 +11,7 @@ import okhttp3.Response
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.io.PushbackInputStream
 import java.net.Proxy
 import java.net.InetAddress
 import java.util.concurrent.ConcurrentHashMap
@@ -40,6 +41,7 @@ object AndroidHttp {
         val host = request.build().url.host
         if (host !in setOf("127.0.0.1", "localhost", "::1") && (wifi == null || !GuardRuntime.running))
             throw IOException("Wi-Fi 不可用或守护已停止")
+        if (active.size >= 8) throw IOException("网络请求暂时繁忙")
         val builder = client.newBuilder().callTimeout(timeoutMs, TimeUnit.MILLISECONDS)
             .connectTimeout(timeoutMs, TimeUnit.MILLISECONDS).readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
         wifi?.let { network ->
@@ -69,9 +71,14 @@ object AndroidHttp {
                     try {
                         response.use {
                             val body = response.body
-                            val raw = body?.byteStream()
-                            val stream = if (response.header("Content-Encoding").equals("gzip", true) && raw != null)
-                                GZIPInputStream(raw) else raw
+                            val raw = body?.byteStream()?.let { PushbackInputStream(it, 2) }
+                            val first = raw?.read() ?: -1
+                            val second = raw?.read() ?: -1
+                            if (second >= 0) raw?.unread(second)
+                            if (first >= 0) raw?.unread(first)
+                            val zipped = response.header("Content-Encoding").equals("gzip", true) ||
+                                (first == 0x1f && second == 0x8b)
+                            val stream = if (zipped && raw != null) GZIPInputStream(raw) else raw
                             val output = ByteArrayOutputStream()
                             if (stream != null) {
                                 stream.use {
